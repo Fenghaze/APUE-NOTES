@@ -1,2 +1,2 @@
-CFLAGS+=-pthread
-LDFLAGS+=-pthread
+CFLAGS+=-pthread -Wall -fopenmp
+LDFLAGS+=-pthread 
