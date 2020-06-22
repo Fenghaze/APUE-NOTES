@@ -127,17 +127,60 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 
 
 
+# 4 readv、writev
+
+从多个碎片的小地址读或写
+
+```c
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
+
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+```
 
 
-# 其他读写函数
+
+# 5 存储映射IO
+
+把内存或文件的某块内容映射到当前进程空间中
+
+## 5.1 mmap
+
+`void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);`
+
+- addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配
+- length：地址长度
+- prot：操作（读/写）
+- flags：权限（共享、私有）
+- fd：文件描述符，打开映射文件
+- offset：指定文件偏移量
 
 
 
-# 存储映射IO
+`int munmap(void *addr, size_t length);`
+
+解除映射
 
 
 
-# 文件锁
+> 【示例1】映射文件到当前进程：mmap.c
+
+> 【示例2】映射内存到父子进程，子进程写父进程读：fork_mmap.c
 
 
+
+# 6 文件锁
+
+对文件进行加锁，防止产生竞争冲突
+
+```c
+int fcntl(int fd, int cmd, ... /* arg */ );
+
+int lockf(int fd, int cmd, off_t len);
+
+int flock(int fd, int operation);
+```
+
+
+
+> 【示例】20个子进程写同一个文件：add.c
 
