@@ -141,18 +141,22 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 # 5 存储映射IO
 
-把内存或文件的某块内容映射到当前进程空间中
+把磁盘的文件的某块内容映射到当前进程虚拟空间中，==可用于进程间通信==
 
-## 5.1 mmap
+
+
+## 5.1 mmap、munmap
 
 `void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);`
 
 - addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配
-- length：地址长度
-- prot：操作（读/写）
+- length：映射区长度
+- prot：映射区的操作权限（读/写）
 - flags：权限（共享、私有）
-- fd：文件描述符，打开映射文件
-- offset：指定文件偏移量
+- fd：文件描述符，打开要映射的文件
+- offset：指定要映射文件的偏移量
+
+如果成功，返回创建的映射区首地址；失败，返回MAP_FAILED宏
 
 
 
@@ -164,7 +168,46 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 > 【示例1】映射文件到当前进程：mmap.c
 
-> 【示例2】映射内存到父子进程，子进程写父进程读：fork_mmap.c
+> 【示例2】使用匿名映射到父子进程，子进程写父进程读：fork_mmap.c
+>
+> 【示例3】无血缘关系进程间通信
+
+
+
+==注意事项：==
+
+- 映射区大小不能为0（不能在open的时候使用O_CREATE创建一个**空文件**映射到进程空间）
+- 映射区的权限 **<=** 文件打开权限
+- 创建映射区时，文件至少需要有**读的权限**
+- 文件偏移量参数，必须是4K的整数倍（CPU的MMU单元负责内存映射，映射单位是4K）
+
+
+
+## 5.2 匿名映射区
+
+在之前的映射时，每次创建映射区一定要依赖一个打开的文件才能实现
+
+通常为了建立一个映射区，要open一个文件，创建好映射区后，再close文件，比较麻烦
+
+Linux系统提供了创建匿名映射区的办法，无需依赖一个文件即可创建映射区，需要指定flags参数
+
+flags=`MAP_SHARED|MAP_ANONYMOUS`
+
+```c
+int *p = mmap(NULL, 4, PROT_READ, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+// 映射区长度任意；文件描述符为-1，不使用文件
+```
+
+
+
+由于这个匿名映射的宏是Linux提供的，因此不适用于其他操作系统
+
+这时，可以使用`/dev/zero`文件来创建映射区，这个文件的大小是无限大的，给一指定任意长度，和`/dev/null`文件相对应
+
+```c
+fd = open("/dev/zero", O_RDWR);
+p = mmap(NULL, size, PROT_READ, MMAP_SHARED, fd, 0);
+```
 
 
 
