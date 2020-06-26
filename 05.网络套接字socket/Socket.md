@@ -49,14 +49,9 @@ IP地址+端口号对应一个socket。欲建立连接的两个进程各自有�
 网络socket用于**不同主机之间的进程间通信**
 
 - socket必须要有发送端和接收端（成对出现）
-
 - ==在Linux中，Socket是一种文件类型==（伪文件，不占用磁盘空间）
-
 - socket的文件描述符指向两个缓冲区（读、写）
-
 - socket是全双工
-
-![](./2020-06-25 11-32-18 的屏幕截图.png)
 
 
 
@@ -118,9 +113,9 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 
 
-# 报式套接字
+# 报式套接字 UDP
 
-被动端：接收包的一端，需要先运行
+被动端（服务端）：接收包的一端，需要先运行（接受请求，并返回数据）
 
 1、取得socket
 
@@ -132,7 +127,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 
 
-主动端：发包的一端
+主动端（客户端）：发包的一端（首先发起请求）
 
 1、取得socket
 
@@ -144,7 +139,11 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 
 
-**接收/发送数据用到的函数**
+命令行：`netstat -anu`查看UDP的连接情况
+
+
+
+**报式套接字接收/发送数据用到的函数**
 
 ```c
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, 
@@ -157,5 +156,177 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 
 
 
-# 流式套接字
+> 【示例】rcver.c, snder.c, proto.h
 
+
+
+## 多点通讯
+
+- 广播：全网广播、子网广播
+- 多播（组播）
+
+
+
+### socket选项
+
+```c
+int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
+
+int setsockopt(int sockfd, int level, int optname, 
+               const void *optval, socklen_t optlen);
+```
+
+
+
+> 【示例】广播：brodcast_snder.c
+
+
+
+## UDP
+
+UDP：不可靠传输，会丢报（包）
+
+TTL：经过路由的个数（路由跳数），Linux环境下默认为64，这个数量是完全足够通信的
+
+
+
+丢报的原因：阻塞（由于数据包过多，队列等待）
+
+解决办法：
+
+停等式流控（客户端收到服务端的DATA后返回一个ACK）
+
+RTT：服务器等待接收ACK的时间
+
+DATA需要加编号，ACK也要加编号，以确保尽量不丢包
+
+
+
+==数据传输过程中常会出现以下情况：==
+
+![](./2020-06-26 11-18-56 的屏幕截图.png)
+
+![](./2020-06-26 11-19-14 的屏幕截图.png)
+
+从上面四种情况可以看出，停等式传输策略的缺点是客户端必须要获得一个数据包后才能发送一个ACK响应，同样的，服务端必须要等待一个ACK响应后才继续发送下一个数据包，效率很低
+
+**优化停等式传输策略：**
+
+![](./2020-06-26 13-28-23 的屏幕截图.png)
+
+
+
+# 流式套接字 TCP
+
+客户端（主动端）
+
+1、取得socket
+
+2、给socket取得地址（可省略）
+
+3、**发送连接**
+
+4、收/发消息
+
+5、关闭socket
+
+
+
+服务端（被动端）：
+
+1、取得socket
+
+2、给socket绑定IP和端口号
+
+3、**将socket置为监听模式，等待客户端的连接请求**
+
+4、**接受连接**，==发送连接接受连接的过程就是TCP的三次握手==
+
+5、收/发消息
+
+6、关闭socket
+
+
+
+命令行：`netstat -ant`查看TCP的连接情况
+
+
+
+**流式套接字接收/发送数据用到的函数**
+
+```c
+ssize_t send(int sockfd, const void *buf, size_t len, int flags);
+
+ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+```
+
+
+
+> 【示例】server.c, client.c, proto.h
+>
+> 【示例】服务器并发版，当接收到一个连接请求后，让子进程去发送数据：server_fork.c
+>
+> 【示例】静态进程池（进程池大小固定）：server_pool.c
+>
+> 【示例】动态进程池（进程池大小有一定范围）：server_dpool.c
+
+
+
+## 监听 socket
+
+```c
+int listen(int sockfd, int backlog);
+```
+
+- sockfd：socket文件描述符
+- backlog：能够接收的连接数L上限
+
+
+
+## 发送/接受连接
+
+```c
+int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+- addr：接受客户端的socket，以保证点对点连接
+如果连接成功，返回socket文件描述符，这个socket连接到调用connect的客户端
+```
+
+
+
+## TCP 三次握手
+
+TCP三次握手是为了建立连接，连接成功后才开始数据传输
+
+这实现了点对点的传输，同时也解决了优化停等式传输策略的问题
+
+![](./2020-06-26 13-49-35 的屏幕截图.png)
+
+完成一二次握手的状态称为**半连接状态**
+
+在服务端存在一个**半连接池**，里面存放着已经完成一二次握手的网络节点，当客户端第三次握手时，就从半连接池中找到对应的节点进行连接
+
+这会引发**半连接池洪水攻击**
+
+
+
+==解决办法：==
+
+cookie=hash(对端IP+对端Port+我端IP+我端Port+传输协议|salt)，salt由内核产生（1s生成一次）
+
+在第二次握手时，服务端携带一个cookie1发送给客户端
+
+第三次握手时，客户端返回一个cookie2给服务端，服务端对cookie2进行验证，如果cookie1==cookie2，那么就建立连接
+
+
+
+# 小结
+
+- 在Linux中，网络套接字是一个文件描述符，意味着可以使用IO操作来对文件描述符进行操作
+- socket是全双工的
+- 网络套接字必须存在于两端
+- 网络套接字包含了两端通信的协议、IP、端口号
+- 两端通信时，协议一致，数据的格式也要一致
+- 服务端的套接字一定要使用`bind()`来绑定一个服务端口，方便客户端请求
+- 使用wireshark抓包工具来分析连接情况

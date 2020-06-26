@@ -39,8 +39,8 @@ int main()
         printf("-------MESSAGE FROM %s:%d-----\n",
                 ipstr, ntohs(radrr.sin_port));
         printf("NAME=%s\n", rbuf.name);
-        printf("MATH=%s\n", ntohl(rbuf.math));
-        printf("CHINESE=%s\n", ntohl(rbuf.chinese));
+        printf("MATH=%s\n", rbuf.math);
+        printf("CHINESE=%s\n", rbuf.chinese);
     }
     close(sd);
 
