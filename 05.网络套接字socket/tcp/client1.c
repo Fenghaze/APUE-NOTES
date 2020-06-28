@@ -1,38 +1,40 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<sys/socket.h>
-#include<unistd.h>
-
-#define SERV_PORT   6666    
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <netinet/in.h>
+#include <string.h>
+ #include <arpa/inet.h>
+#define SERV_PORT 6666
 
 int main()
 {
-    int lfd, cfd;
-    struct sockaddr_in serv_addr, cli_addr;    
+    int cfd;
+    struct sockaddr_in serv_addr;
     socklen_t len;
     char buf[BUFSIZ];
     int n;
-    lfd = socket(AF_INET, SOCK_STREAM, 0);
+    cfd = socket(AF_INET, SOCK_STREAM, 0);
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(SERV_PORT);
-    inet_pton(lfd, "0.0.0.0", &serv_addr.sin_addr);
-
-    bind(lfd, (void *)&serv_addr, sizeof(serv_addr));
-
-    listen(lfd, 128);
-    
-    len = sizeof(cli_addr);
-    cfd = accept(lfd, (void *)&cli_addr, &len);
-
-    n = read(cfd, buf, BUFSIZ);
-    for (int i = 0; i < n; i++)
+    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    if(connect(cfd, (void *)&serv_addr, sizeof(serv_addr))<0)
     {
-        buf[i] = toupper(buf[i]);   /* code */
+        perror("connect()");
+        exit(1);
     }
-    write(cfd, buf, n);
-
-    close(lfd);
+    
+    while (1)
+    {
+        fgets(buf, sizeof(buf), stdin);
+        // 向当前客户端的socket写入数据
+        write(cfd, buf, strlen(buf));
+        // 服务端对写入的数据进行转化，将结果写入到客户端的socket
+        // 再从客户端的socket读取数据
+        n = read(cfd, buf, sizeof(buf));
+        write(STDOUT_FILENO, buf, n);
+    }
     close(cfd);
     return 0;
 }
