@@ -50,7 +50,7 @@
 
 
 
-# 3 IO多路转接
+# 3 ==IO多路转接==
 
 实现文件描述符的监视，当文件描述符状态发生改变时，才去推动状态机，而不是盲目等待
 
@@ -78,13 +78,35 @@ epoll; // 是poll在Linux封装的方言
 
 `int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);`
 
+fd_set是位图
+
 - nfds：监视的最大文件描述符+1
-- readfds：读文件描述符的集合
+- readfds：读文件描述符的集合（监听集合中的文件描述符的读事件）
 - writefds：写文件描述符的集合
 - exceptfds：异常文件描述符的集合
 - timeout：超时设置
 
-如果成功，返回监视的文件描述符个数；如果失败，返回-1和errno
+如果成功，返回监听集合中满足条件的文件描述符个数；如果失败，返回-1和errno
+
+
+
+问题1：如何将文件描述符添加到各个集合中？
+
+先调用`FD_ZERO`，再`FD_SET`
+
+问题2：对于成功返回的文件描述符个数，如何区分哪个fd来自与哪个集合？
+
+for循环，调用`FD_ISSET`来判断每个集合中是否存在fd
+
+```c
+void FD_ZERO(fd_set *set);			//将集合清空
+
+void FD_CLR(int fd, fd_set *set);	//将一个fd从set中清除
+
+void FD_SET(int fd, fd_set *set);	//将一个fd添加到set中
+
+int  FD_ISSET(int fd, fd_set *set);	//判断fd是否在集合中
+```
 
 
 
@@ -92,7 +114,7 @@ epoll; // 是poll在Linux封装的方言
 
 
 
-缺点：监视的文件描述符类型太少
+缺点：监视的文件描述符类型太少；同时监听的文件描述符有上限（1024）；
 
 优点：可移植性好
 
@@ -102,9 +124,17 @@ epoll; // 是poll在Linux封装的方言
 
 `int poll(struct pollfd *fds, nfds_t nfds, int timeout);`
 
-- fds：存放了文件描述符的结构体数组的起始位置
+- fds：存放了文件描述符及其事件的结构体数组的起始地址
 - nfds：数组中文件描述符个数
 - timeout：超时设置
+
+```c
+struct pollfd {
+    int   fd;         /* file descriptor */
+    short events;     /* 要监听的事件：POLLIN/POLLOUT/POLLERR */
+    short revents;    /* 当监听到某事件后，会自动赋值 */
+};
+```
 
 
 
@@ -112,18 +142,60 @@ epoll; // 是poll在Linux封装的方言
 
 
 
-## 3.3 epoll
+优点：没有监听上限；监听、返回集合分离；
+
+
+
+## 3.3 ==epoll==
+
+epoll是Liunx的方言，是select/poll的增强版本
+
+epoll的存储结构是一棵**红黑树**
 
 ```c
-// 1、创建一个epoll实例
+// 1、创建epoll句柄
 int epoll_create(int size); 
+- size：监听的文件描述符个数
+成功，返回一个epfd（epfd是一棵红黑树的根节点，有size个文件描述符作为结点）
 
-// 2、操作一个epoll实例
+// 2、设置epoll
 int  epoll_ctl(int  epfd,  int  op,  int  fd,  struct epoll_event *event);
+- op：对红黑树中的结点进行的操作（增加/删除文件描述符结点）
+- event：监听事件结构体的地址
 
-//
+// 3、监听等待
 int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
+- events：监听事件结构体数组的首地址
+- maxevents：数组容量
+- timeout：超时等待
+成功，返回监听到的文件描述符个数，结构体数组中自动存放了监听到的fd及其事件（要使用for循环执行后来的操作）
+
+// 结构体
+typedef union epoll_data {
+    void        *ptr;	// 应用于epoll反应堆模型
+    int          fd;
+    uint32_t     u32;
+    uint64_t     u64;
+} epoll_data_t;
+
+struct epoll_event {
+    uint32_t     events;      /* EPOLLIN/OUT/ERR */
+    epoll_data_t data;        /* User data variable */
+};
 ```
+
+
+
+### epoll触发模式
+
+- 边沿触发：epoll ET
+- 水平触发：epoll LT
+
+
+
+### epoll 反应堆模型
+
+
 
 
 
