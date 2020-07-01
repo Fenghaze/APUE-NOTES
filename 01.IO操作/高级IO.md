@@ -188,8 +188,8 @@ struct epoll_event {
 
 ### epoll触发模式
 
-- 边沿触发：epoll ET
-- 水平触发：epoll LT
+- 边沿触发：epoll ET：事件变化时才触发（指定事件时：EPOLLIN|EPOLLET）
+- 水平触发：epoll LT（默认）
 
 
 
