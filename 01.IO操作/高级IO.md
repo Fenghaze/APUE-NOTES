@@ -190,14 +190,45 @@ struct epoll_event {
 
 ### epoll触发模式
 
-- 边沿触发：epoll ET：事件变化时才触发（指定事件时：EPOLLIN|EPOLLET）
+- ==边沿触发==：epoll ET：事件变化时才触发（指定事件时：EPOLLIN|EPOLLET）
 - 水平触发：epoll LT（默认）
+- ==epoll非阻塞==：`fcntl() `
+
+通常采用边沿触发+epoll非阻塞
 
 
 
-### epoll 反应堆模型
+### ==epoll 反应堆模型（libevent核心思想）==
+
+libevent库：跨平台，使用了大量的回调函数，实现了高并发
+
+反应堆是指反应快。。。
 
 
+
+反应堆模型与普通epoll模型的区别：
+
+- （1）反应堆模型增加了对客户读cfd的**可写事件**的监听
+- （2）使用了回调函数
+
+```c
+// ptr指向以下结构体
+struct epoll_event
+{
+    int fd;		// 要监听的文件描述符
+    int events;	// 对应的监听事件
+    void *arg;	// 泛型参数
+    void (*call_back)(int fd, int events, void *arg);	// 回调函数
+    int status;	// 是否在监听：1表示在红黑树上，0表示不在红黑树上
+    char buf[BUFSIZE];
+    int len;
+    long last_active;	// 记录每次fd加入红黑树 efd 的时间，类似超时设置
+}
+```
+
+
+
+> 示例：./epoll_reactor/reactor.c
 
 
 
