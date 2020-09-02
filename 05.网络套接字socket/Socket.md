@@ -421,3 +421,21 @@ IO多路转接：实现文件描述符的监视，当文件描述符状态发生
 
 
 > 【示例】：./thread_pool/pool.c
+
+
+
+# 开源库
+
+常见的开源库：libevent、libev（libevent的升级版，增加了线程）
+
+
+
+## 开源库的一般使用方式
+
+查看README
+
+- 执行`./configure`：检查当前主机环境是否适合安装，自动生成makefile
+- 执行`make`：编译
+- 执行`sudo make install`
+- simple目录是例子
+
