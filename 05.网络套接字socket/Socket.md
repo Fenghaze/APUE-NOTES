@@ -1,3 +1,5 @@
+
+
 # 网络字节序
 
 小端法存储：低位存放在低地址，高位存放在高地址
@@ -8,7 +10,7 @@
 
 计算机数据采用的是小端字节序
 
-网络数据流采用的是大端字节序
+网络数据流采用的是**大端字节序**
 
 
 
@@ -19,18 +21,23 @@
 
 // 端口号转换为网络字节序
 uint16_t htons(uint16_t hostshort);
-// 网络字节序转换为端口号
+// 网络字节序转换为端口号，2个字节
 uint16_t ntohs(uint16_t netshort);
 
-// IP地址转换为网络字节序
+// ip，4个字节，主机字节序转为网络字节序
+uint32_t htonl(uint32_t hostlong);
+// 网络字节序转为主机字节序
+uint32_t ntohl(uint32_t netlong);
+
+// IP地址（src）转换为网络字节序（dst）
 int inet_pton(int af, const char *src, void *dst);
 // 网络字节序转换为IP地址
 const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
 ```
 
 - af：ipv4/ipv6
-- src：源IP
-- dst：目的IP
+- src：主机IP地址
+- dst：转换后的网络字节序存储到struct sockadd_in的sin_addr中
 
 
 
@@ -58,6 +65,7 @@ IP地址+端口号对应一个socket。欲建立连接的两个进程各自有�
 # sockaddr_in 数据结构
 
 ```c
+// ipv4
 struct sockaddr_in {
     sa_family_t    sin_family; /* 网络协议族: AF_INET(ipv4) */ 
     in_port_t      sin_port;   /* 端口号 */
@@ -81,11 +89,12 @@ struct in_addr {
 int socket(int domain, int type, int protocol);
 ```
 
-- domain：网络协议族（AF_INET, AF_INET6, AF_UNIX）
+- domain：网络协议族（AF_INET（ipv4）, AF_INET6（ipv6）, AF_UNIX）
 - type：套接字类型
-  - SOCK_STREAM：流式套接字
-  - SOCK_DGRAM：报式套接字
-- protocol：协议
+  - SOCK_STREAM：流式套接字（TCP）
+  - SOCK_DGRAM：报式套接字（UDP）
+  - SOCK_RAW：原始套接字
+- protocol：协议，一般为0
 
 成功返回一个文件描述符，否则返回-1和errno
 
@@ -115,11 +124,13 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 # 报式套接字 UDP
 
+**UDP不需要建立连接，没有使用listen、accept、connect函数**
+
 被动端（服务端）：接收包的一端，需要先运行（接受请求，并返回数据）
 
 1、取得socket
 
-2、给socket取得地址
+2、给socket绑定IP+端口，bind（）
 
 3、收/发消息
 
@@ -156,7 +167,7 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 
 
 
-> 【示例】rcver.c, snder.c, proto.h
+> 【示例】`src/`rcver.c, snder.c, proto.h
 
 
 
@@ -172,8 +183,7 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 ```c
 int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
 
-int setsockopt(int sockfd, int level, int optname, 
-               const void *optval, socklen_t optlen);
+int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
 ```
 
 
@@ -213,6 +223,27 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 **优化停等式传输策略：**
 
 ![](./2020-06-26 13-28-23 的屏幕截图.png)
+
+## TFTP：简单文件传送协议
+
+最初用于引导无盘系统，被设计用来传输小文件，应用场景：网吧
+
+特点：
+
+- 基于UDP协议实现
+- 不进行用户有效性认证
+
+数据传输模式：
+
+- octet：二进制模式
+
+- netascii：文本模式
+
+  
+
+  ![](./tftp1.png)
+
+![](./tftp.png)
 
 
 
@@ -258,6 +289,10 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 ssize_t send(int sockfd, const void *buf, size_t len, int flags);
 
 ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+/****************************************************************/
+ssize_t write(int fd, const void *buf, size_t count);
+
+ssize_t read(int fd, void *buf, size_t count);
 ```
 
 
@@ -438,4 +473,19 @@ IO多路转接：实现文件描述符的监视，当文件描述符状态发生
 - 执行`make`：编译
 - 执行`sudo make install`
 - simple目录是例子
+
+
+
+# 抓包工具 Wireshark
+
+过滤器的使用：可以过滤一个或多个条件，条件用and连接
+
+如：ip.src == 10.20.155.12 and udp and udp.port == 2425
+
+常用过滤条件：
+
+- ip.addr、ip.src、ip.dst
+- udp
+- tcp
+- port
 
