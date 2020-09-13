@@ -174,25 +174,31 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 ## 多点通讯
 
 - 广播：全网广播、子网广播
-- 多播（组播）
+- 多播（组播）：给一个多播组发消息
+  - 有一个多播地址，组员主动加入多播组
+  - 多播地址：D类地址，224.0.0.1-239.255.255.254
 
 
 
-### socket选项
+### 设置socket选项
 
 ```c
 int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
 
 int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
+广播
+- level：SOL_SOCKET
+- optname：SO_BROADCAST
+广播地址为：x.x.x.255 or 255.255.255.255
 ```
 
 
 
-> 【示例】广播：brodcast_snder.c
+> 【示例】广播：`src/`brodcast_snder.c
 
 
 
-## UDP
+## UDP传输过程
 
 UDP：不可靠传输，会丢报（包）
 
@@ -267,6 +273,18 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 
 1、取得socket
 
+绑定之前可以设置socket属性（服务器关闭后立即关闭端口，`netstat -ant`查看tcp连接情况）
+
+```c
+// 设置socket属性
+int val =1 ;
+if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))<0)
+{
+    perror("setsockopt()");
+    exit(1);
+}
+```
+
 2、给socket绑定IP和端口号
 
 3、**将socket置为监听模式，等待客户端的连接请求**
@@ -307,18 +325,28 @@ ssize_t read(int fd, void *buf, size_t count);
 
 
 
-## 监听 socket
+## 监听 listen
 
 ```c
 int listen(int sockfd, int backlog);
 ```
 
 - sockfd：socket文件描述符
-- backlog：能够接收的连接数L上限
+- backlog：未完成连接socket队列和已完成连接socket队列之和的最大值，一般为128
 
 
 
-## 发送/接受连接
+服务端设置监听套接字后，该套接字由主动变为被动，同时在系统内部创建两个任务队列缓冲区：**未完成连接队列**和**已完成连接队列**
+
+服务端accept阻塞等待客户端发起connect请求
+
+connect请求，实则是在建立三次握手，将这个连接任务加入未完成连接队列
+
+当三次握手成功，连接成功，加入已完成连接队列，服务端accept的作用就是从已完成连接队列中提取，并自动**创建一个新的socket用于客户端和服务端通信**
+
+
+
+## 请求connect/接受accept连接
 
 ```c
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
@@ -326,7 +354,7 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 - addr：接受客户端的socket，以保证点对点连接
-如果连接成功，返回socket文件描述符，这个socket连接到调用connect的客户端
+如果连接成功，返回socket文件描述符，这个新的socket连接到调用connect的客户端，此后用这个新的socket与客户端进行通信
 ```
 
 
@@ -337,13 +365,26 @@ TCP三次握手是为了建立连接，连接成功后才开始数据传输
 
 这实现了点对点的传输，同时也解决了优化停等式传输策略的问题
 
+
+
+三次握手时，会携带序列号和确认序列号
+
+- 序列号（seq）：初始为0，每次通信，序列号为对方发送的确认序列号，用于确认收到对方的报文
+
+- 确认序列号（ack）：收到对方的序列号+SYN标志位长度1+对方发送的数据长度（三次握手过程中没有数据传输）
+
+  - 期望下一次对方发送的序列号是我这次发送过去的确认序列号，用于确认收到对方的报文
+  - 数据长度的作用是：当收到数据报后知道收到了多少个数据，从而确认数据报是否完整
+
+  ![](./三次握手.png)
+
 ![](./2020-06-26 13-49-35 的屏幕截图.png)
 
 完成一二次握手的状态称为**半连接状态**
 
-在服务端存在一个**半连接池**，里面存放着已经完成一二次握手的网络节点，当客户端第三次握手时，就从半连接池中找到对应的节点进行连接
+在服务端存在一个**未完成连接队列（半连接池）**，里面存放着已经完成一二次握手的网络节点，当客户端第三次握手时，就从半连接池中找到对应的节点进行连接
 
-这会引发**半连接池洪水攻击**
+这会引发**半连接池洪水攻击**：客户端只进行一二次握手，不进行第三次握手，导致半连接池中的网络节点爆满，服务端无法处理连接请求
 
 
 
@@ -368,7 +409,7 @@ cookie=hash(对端IP+对端Port+我端IP+我端Port+传输协议|salt)，salt由
 
 半关闭：允许一端关闭连接，另一端不关闭连接（可以继续传输数据）
 
-
+![](./四次挥手.png)
 
 ## 半关闭函数 shutdown
 
