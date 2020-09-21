@@ -308,13 +308,20 @@ epoll_events中的events成员是一个位图，当监听到事件后，文件�
 ### epoll触发模式
 
 - 水平触发（电平一直为0或1就触发）：EPOLLLT（默认）
-  - 读缓冲区**只要有数据就会被触发**
+  - **读缓冲区只要有数据就会被触发；写缓冲区只要可写就会被触发**
   - 比如远端发送10个字节的数据，服务端一次处理5个字节，缓冲区还剩5个字节，数据需要读取两次才能将缓冲区读完，那么`epoll_wait()`就会一直触发两次
 - ==边沿触发（电平由0变1或由1变0就触发）==：EPOLLET
-  - **事件变化时才触发，数据到达才会触发**
+  - **读缓冲区只要有数据到达就会被触发；写缓冲区只要数据被发送了就会被触发**
   - 比如远端发送10个字节的数据，服务端一次处理5个字节，缓冲区还剩5个字节，但是`epoll_wait()`只会触发一次，如果不使用循环读完，那么剩下的字节就无法读取；只有当**新的数据**发送过来时，才会再次触发，继续读剩下的字节
   - ==写法：==事件监听时，使用`EPOLLIN|EPOLLET`
 - ==epoll非阻塞==：`fcntl() `
+
+```c++
+// 将新客户端cfd设置为非阻塞，read为非阻塞
+int flag = fcntl(cfd, F_GETFL);
+flag |= O_NONBLOCK;
+fcntl(cfd, F_SETFL, flag);
+```
 
 
 
@@ -359,14 +366,6 @@ EPOLLOUT事件只有在连接时触发一次，表示可写，其他时候想要
 **EPOLLIN事件：**
 EPOLLIN事件则只有当对端有数据写入时才会触发，所以触发一次后需要不断读取所有数据直到读完**EAGAIN**为止。否则剩下的数据只有在下次对端有写入时才能一起取出来了。
 现在明白为什么说epoll必须要求异步socket了吧？如果同步socket，而且要求读完所有数据，那么最终就会在堵死在阻塞里。
-
-
-
-### ==epoll+线程池==
-
-线程的工作是处理每个客户端的请求
-
-main线程来监听lfd，设计一个线程池来处理任务
 
 
 
@@ -416,13 +415,22 @@ struct xxevent
 	
 5、main函数：
 	创建lfd，配置、绑定、监听lfd
+	定义事件数组
 	调用eventadd()将lfd添加到红黑树，回调函数为initAccept()
-	
+	while(1)
+	{
+		n = epoll_wait();
+		for循环处理事件数组中的事件，调用回调函数
+	}
 ```
 
 
 
+### ==epoll+线程池==
 
+线程的工作是处理每个客户端的请求
+
+main线程来监听lfd，设计一个线程池来处理任务
 
 
 
@@ -432,13 +440,35 @@ struct xxevent
 
 # 4 readv、writev
 
-从多个碎片的小地址读或写
-
 ```c
+#include<sys/uio.h>
+
+// 将数据从文件描述符读到分散的内存块中，即分散读
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
 
+// 将多块分散的内存数据一并写入到文件描述符中，即集中写
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 ```
+
+
+
+# sendfile
+
+sendfile函数在两个文件描述符之间直接传递数据（完全在内核中操作），从而避免了内核缓冲区和用
+户缓冲区之间的数据拷贝，效率很高，这被称为零拷贝。sendfile函数的定义如下：
+
+```c++
+#include <sys/sendfile.h>
+// 将文件发送给cfd
+ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
+- out_fd：待写入内容的文件描述符，必须是一个socket
+- in_fd：真实文件的文件描述符，类似mmap函数的文件描述符
+- offset:待读出内容的文件流偏移量，NULL表示从头开始读
+- count:指定在文件描述符in_fd和out_fd之间传输的字节数
+成功，返回传输的字节数；失败返回-1并设置errno
+```
+
+**sendfile()几乎是专门为在网络上传输文件而设计的**
 
 
 

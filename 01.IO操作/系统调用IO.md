@@ -10,7 +10,7 @@
 
 文件描述符的实质：是一个整型（==数组==的下标），==优先使用当前可用范围内最小的下标==
 
-不打开任何文件时，默认 fd=0，1，2分别表示stdin，stdout，stderr
+不打开任何文件时，默认 fd=0，1，2分别表示**文件流**stdin，stdout，stderr
 
 
 
@@ -293,13 +293,13 @@ int main(int argc, char** argv)
 
 `int dup(int fd);`
 
-将fd复制一份到当前可用范围内最小的文件描述符，返回一个新的fd
+将fd复制一份到当前可用范围内最小的文件描述符，返回一个新的fd（创建一个新的fd，这个fd与参数fd指向同一个文件）
 
 
 
 `int dup2(int fd, int fd2);`
 
-先将fd2关闭，然后将fd复制一份到指定的文件描述符fd2
+先将fd2关闭，然后将fd复制一份到指定的文件描述符fd2（fd2指向fd的文件）
 
 
 
@@ -363,9 +363,30 @@ dup2(fd, 2);
 
 
 
-# 8 fcntl()，ioctl()
+# 8 ==fcntl()==，ioctl()
 
 `fcntl()`：文件描述符相关的魔术都来源于这个函数
+
+```c++
+#include<fcntl.h>
+int fcntl(int fd, int cmd,...);
+- fd：要操作的文件描述符
+- cmd：要执行的操作
+失败返回-1并设置errno
+```
+
+在网络编程中，一般会使用`fcntl()`将一个文件描述符设置为非阻塞的：
+
+```c++
+int setnonblocking(int fd)
+{
+    int flag = fcntl(fd, F_GETFL);	//获取fd旧的状态标志
+    flag = flag | O_NONBLOCK;		//更新为非阻塞标志
+    fcntl(fd, F_SETFL, flag);		//将fd设置为非阻塞
+}
+```
+
+
 
 `ioctl()`：设备相关的内容由这个函数来管理
 
