@@ -22,6 +22,14 @@
 
 阻塞IO：即便有一个任务阻塞了，也不会影响到整体的任务循环
 
+## 1.1 阻塞IO，非阻塞IO（NIO），异步IO（AIO）
+
+阻塞IO：会一直等到有数据才执行下一步
+
+非阻塞IO：使用非阻塞IO时，如果有数据则立即返回结果，否则返回错误码；不会像阻塞IO一直停留在这一步
+
+异步IO：调用异步IO后，会执行下一步，当有数据时，内核会发起通知
+
 
 
 # 2 有限状态机编程思路
@@ -165,7 +173,7 @@ while(1){
 
 在判断cfd的状态是否在监听集合中，方法是遍历所有已连接套接字【lfd+1， maxfd】，一个一个遍历是否在可读集合中
 
-在Linux中，默认监听的最大描述符个数为1024，012是默认的就有的
+在Linux中，默认监听的最大描述符个数为1024
 
 
 
@@ -195,7 +203,7 @@ while(1){
 
 - 有最大文件描述符的个数限制 FD_SETSIZE = 1024 
 
-- 每一次重新监听都需要再次设置需要监听集合,集合重用户态拷贝至内核态消耗资源
+- 每一次重新监听都需要再次设置需要监听集合,集合从用户态拷贝至内核态消耗资源
 - 监听到文件描述符变化之后,需要用户自己遍历集合才知道具体哪个文件描述符变化了  
 - 大量并发，少数活跃，select的效率低
 
@@ -213,11 +221,13 @@ while(1){
 struct pollfd {
     int   fd;         /* file descriptor */
     short events;     /* 要监听的事件：POLLIN/POLLOUT/POLLERR */
-    short revents;    /* 当监听到某事件后，会自动赋值 */
+    short revents;    /* 当监听到某事件后，会自动赋值,初始化为0 */
 };
+- POLLIN：可读
+- POLLOUT：可写
+- POLLHUP：客户端关闭连接
+- POLLERR：异常
 ```
-
-
 
 > 例子：poll.c
 
@@ -278,8 +288,6 @@ struct epoll_event {
     epoll_data_t data;        /* User data variable */
 };
 ```
-
-
 
 
 
@@ -454,8 +462,8 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
 
 # sendfile
 
-sendfile函数在两个文件描述符之间直接传递数据（完全在内核中操作），从而避免了内核缓冲区和用
-户缓冲区之间的数据拷贝，效率很高，这被称为零拷贝。sendfile函数的定义如下：
+sendfile函数在两个文件描述符之间直接传递数据（完全在内核中操作），从而==避免了内核缓冲区和用
+户缓冲区之间的数据拷贝，效率很高，这被称为零拷贝==。sendfile函数的定义如下：
 
 ```c++
 #include <sys/sendfile.h>
@@ -469,6 +477,39 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
 ```
 
 **sendfile()几乎是专门为在网络上传输文件而设计的**
+
+
+
+# pipe
+
+详见【../03.多进程、管道/进程间通信.md】
+
+
+
+# splice
+
+splice函数在内核中实现**两个文件描述符之间移动数据**，也是零拷贝操作。splice函数的定义如下:
+
+```c
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
+#include <fcntl.h>
+
+ssize_t splice(int fd_in, loff_t *off_in, int fd_out,loff_t *off_out, size_t len, unsigned int flags);
+- fd_in：待输入数据的fd；
+- off_in：如果fd_in是一个管道文件描述符，则该参数为NULL；如果fd_in是socket，则表示从输入数据流的何处开始读取数据（偏移量），NULL表示从当前位置开始读入
+- fd_out/off_out：用于输出数据流
+- len：指定移动数据的长度
+- flags：控制数据如何移动
+    - SPLICE_F_MOVE：按整页内存移动数据
+    - SPLICE_F_NONBLOCK：非阻塞splice操作
+    - SPLICE_F_MORE：给内核一个提示，后续的splice调用将读取更多数据
+```
+
+使用splice函数时，==fd_in和fd_out必须至少有一个是管道文件描述符==。
+
+splice函数调用成功时返回移动字节的数量。它可能返回0，表示没有数据需要移动，这发生在从管道中读取数据（fd_in是管道文件描述符）而该管道没有被写入任何数据时。
+
+splice函数失败时返回-1并设置errno
 
 
 
