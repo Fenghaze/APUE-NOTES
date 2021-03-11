@@ -88,7 +88,7 @@ IP地址+端口号对应一个socket。欲建立连接的两个进程各自有�
 struct sockaddr_in {
     sa_family_t    sin_family; /* 网络协议族: AF_INET(ipv4) */ 
     in_port_t      sin_port;   /* 端口号 */
-    struct in_addr sin_addr;   /* IP地址 */
+    struct in_addr sin_addr;   /* IP地址，需要注意将IP字符串转换为网络字节序*/
 };
 
 /* Internet address. */
@@ -119,6 +119,46 @@ int socket(int domain, int type, int protocol);
 
 
 
+# 获取socket信息
+
+```c++
+int getsockname(int sockfd, struct sockaddr *address, socklen_t *address_len);
+int getpeername(int sockfd, struct sockaddr *address, socklen_t *address_len);
+```
+
+getsockname获取sockfd对应的本端socket地址，并将其存储于address参数指定的内存中，该socket地址的长度则存储于address_len参数指向的变量中。如果实际socket地址的长度大于address所指内存区的大小，那么该socket地址将被截断。getsockname成功时返回0，失败返回-1并设置errno。
+
+getpeername获取sockfd对应的远端socket地址，其参数及返回值的含义与getsockname的参数及返回值相同。
+
+
+
+# 设置socket选项
+
+```c++
+#include＜sys/socket.h＞
+int getsockopt(int sockfd, int level, int option_name, void *option_value, socklen_t *restrict option_len);
+
+int setsockopt(int sockfd, int level, int option_name, const void *option_value, socklen_t option_len);
+```
+
+- level：协议选项，如IPv4、IPv6、TCP等
+- **option_name**：socket选项
+- option_value和option_len参数分别是被操作选项的值和长度
+
+成功时返回0，失败时返回-1并设置errno
+
+|         level          |   option_name    | 数据类型 |                        说明                         |
+| :--------------------: | :--------------: | :------: | :-------------------------------------------------: |
+| SOL_SOCKET（通用选项） |     SO_TYPE      |   int    |                   获取socket类型                    |
+|                        |    SO_RCVBUF     |   int    |         TCP接收缓冲区大小（默认256 bytes）          |
+|                        |    SO_SNDBUF     |   int    |        TCP发送缓冲区大小（默认为2048 bytes）        |
+|                        |   SO_OOBINLINE   |   int    |           将接收到的带外数据看成普通数据            |
+|                        |   SO_KEEPALIVE   |   int    |     发送周期性保活报文以维持连接（**心跳包**）      |
+|                        |   SO_BROADCAST   |   int    |                        广播                         |
+|                        | ==SO_REUSEADDR== |   int    | 重用本地地址，强制使用TIME_WAIT状态占用的socket地址 |
+
+
+
 # 服务端 bind
 
 将address指向的sockaddr结构体中描述的一些属性（IP地址、端口号、地址簇）与socket套接字绑定，也叫给套接字命名
@@ -138,6 +178,31 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 对于Server，bind()是必须要做的事情，==服务器启动时需要绑定指定的端口来提供服务==（以便于客户向指定的端口发送请求），对于服务器socket绑定地址，一般而言将IP地址赋值为INADDR_ANY（该宏值为0），**即无论发送到系统中的哪个IP地址（当服务器有多张网卡时会有多个IP地址）的请求都采用该socket来处理，而无需指定固定IP**
 
 对于Client，一般而言无需主动调用bind()，一切由操作系统来完成。在发送数据前，操作系统会为套接字随机分配一个可用的端口，同时将该套接字和本地地址信息绑定。
+
+
+
+# 通用读写数据函数
+
+```c++
+ssize_t recvmsg(int sockfd, struct msghdr*msg, int flags);
+ssize_t sendmsg(int sockfd, struct msghdr*msg, int flags);
+```
+
+- sockfd：是通信的socket
+- msg：是msghdr结构体类型的指针
+
+```c++
+struct msghdr
+{
+    void *msg_name;/*socket地址*/
+    socklen_t msg_namelen;/*socket地址的长度*/
+    struct iovec *msg_iov;/*分散的内存块，见后文*/
+    int msg_iovlen;/*分散内存块的数量*/
+    void *msg_control;/*指向辅助数据的起始位置*/
+    socklen_t msg_controllen;/*辅助数据的大小*/
+    int msg_flags;/*复制函数中的flags参数，并在调用过程中更新*/
+};
+```
 
 
 
@@ -161,19 +226,15 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 
 1、取得socket
 
-2、给socket取得地址（可省略）
+2、发/收消息
 
-3、发/收消息
-
-4、关闭socket
+3、关闭socket
 
 
 
 命令行：`netstat -anu`查看UDP的连接情况
 
-
-
-**报式套接字接收/发送数据用到的函数**
+## 接收/发送数据用到的函数
 
 ```c
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, 
@@ -184,7 +245,10 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 
 ```
 
+因为UDP通信没有连接的概念，所以我们==每次读取数据都需要获取发送端的socket地址==，即参数src_addr所指的内容，addrlen参数则指定该地址的长度
 
+recvfrom/sendto系统调用也可以用于面向连接（STREAM）的socket的数据读写，只需
+要把最后两个参数都设置为`NULL`以忽略发送端/接收端的socket地址（因为我们已经和对方建立了连接，所以已经知道其socket地址了）
 
 > 【示例】`src/`rcver.c, snder.c, proto.h
 
@@ -196,22 +260,6 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
 - 多播（组播）：给一个多播组发消息
   - 有一个多播地址，组员主动加入多播组
   - 多播地址：D类地址，224.0.0.1-239.255.255.254
-
-
-
-### 设置socket选项
-
-```c
-int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
-
-int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
-广播
-- level：SOL_SOCKET
-- optname：SO_BROADCAST
-广播地址为：x.x.x.255 or 255.255.255.255
-```
-
-
 
 > 【示例】广播：`src/`brodcast_snder.c
 
@@ -274,45 +322,48 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 
 # 流式套接字 TCP
 
-客户端（主动端）
-
-1、取得socket
-
-2、给socket取得地址（可省略）
-
-3、**发送连接请求**
-
-4、收/发消息
-
-5、关闭socket
+![](/assets/2020-06-25 20-34-08 的屏幕截图.png)
 
 
 
-服务端（被动端）：
+## TCP服务端
 
-1、取得socket
+- 1、`socket()`建立一个服务端的==监听套接字==socket ld
 
-绑定之前可以设置socket属性（==端口复用==：服务器关闭后立即关闭端口，`netstat -ant`查看tcp连接情况）
+  - 绑定之前可以设置socket属性（==端口复用==：服务器关闭后立即关闭端口，`netstat -ant`查看tcp连接情况）
 
-```c
-// 设置socket属性
-int val =1 ;
-if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))<0)
-{
-    perror("setsockopt()");
-    exit(1);
-}
-```
+  ```c
+  // 设置socket属性
+  int val =1 ;
+  if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))<0)
+  {
+      perror("setsockopt()");
+      exit(1);
+  }
+  ```
 
-2、给socket绑定IP和端口号
+- 2、`bind()`**绑定一个端口用于服务端的socket服务**
 
-3、**将socket置为监听模式，等待客户端的连接请求**
+- 3、`listen()`监听网络端口号
 
-4、**接受连接**，==发送连接接受连接的过程就是TCP的三次握手==
+- 4、`accept()`接受客户端发起的（connect）连接请求，**该函数创建一个用于和客户端通信的==连接套接字==socket fd**，==发送连接接受连接的过程就是TCP的三次握手==
 
-5、收/发消息
+- 5、`send()`使用accept创建的socket fd与客户端进行数据传输
 
-6、关闭socket
+- 6、`close()`关闭socket
+
+
+
+可使用 `telnet ip port`模拟客户端进行测试
+
+
+
+## TCP客户端
+
+- 1、`socket()`建立一个本地socket ld
+- 2、`connect()`发起请求，连接服务器
+- 3、`recv()`本地sockect ld接收服务端发送的数据
+- 4、`close()`关闭socket ld
 
 
 
@@ -320,17 +371,31 @@ if(setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))<0)
 
 
 
-**流式套接字接收/发送数据用到的函数**
+可使用`nc ip port` 模拟服务端进行测试
+
+
+
+## 接收/发送数据用到的函数
 
 ```c
 ssize_t send(int sockfd, const void *buf, size_t len, int flags);
+// send(connfd, send_msg, strlen(send_msg), 0);
 
 ssize_t recv(int sockfd, void *buf, size_t len, int flags);
+// n = recv(ld, recv_msg, sizeof(recv_msg), 0);
+
+
 /****************************************************************/
 ssize_t write(int fd, const void *buf, size_t count);
+// write(connfd, send_msg, strlen(send_msg));
 
 ssize_t read(int fd, void *buf, size_t count);
+// n = read(ld, recv_msg, sizeof(recv_msg));
 ```
+
+成功，返回实际发送\读取到的数据长度，可能会小于实际的长度，需要==多次调用读写函数==直到数据被完全读\取
+
+recv=0说明对方已经关闭连接，出错时recv=-1
 
 
 
@@ -350,29 +415,34 @@ ssize_t read(int fd, void *buf, size_t count);
 int listen(int sockfd, int backlog);
 ```
 
-- sockfd：socket文件描述符
-- backlog：未完成连接socket队列和已完成连接socket队列之和的最大值，一般为128
+- sockfd：socket文件描述符，==将fd设置为监听套接字==
+- backlog：监听队列最大长度。半连接socket队列和已建立连接socket队列之和的最大值，一般为128
 
 
 
-服务端设置监听套接字后，该套接字由主动变为被动，同时在系统内部创建两个任务队列缓冲区：**未完成连接队列**和**已完成连接队列**
+服务端设置监听套接字后，该套接字由主动变为被动，同时在系统内部创建==两个任务队列缓冲区==：**未完成连接队列（SYN_RCVD）**和**已完成连接队列（ESTABLISHED）**
 
 服务端accept阻塞等待客户端发起connect请求
 
 connect请求，实则是在建立三次握手，将这个连接任务加入未完成连接队列
 
-当三次握手成功，连接成功，加入已完成连接队列，服务端accept的作用就是从已完成连接队列中提取，并自动**创建一个新的socket用于客户端和服务端通信**
+当三次握手成功，连接成功，加入已完成连接队列，服务端accept的作用就是从已完成连接队列中提取客户端socket地址，并自动**创建一个新的连接套接字socket用于客户端和服务端通信**
+
+accept只是从监听队列中取出连接，而不论连接处于何种状态
 
 
 
 ## 请求connect/接受accept连接
 
 ```c
+//客户端主动调用connect()，请求连接
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+- sockfd：本地端socket
 - addr：请求服务端的socket
 
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
-- addr：接受客户端的socket，以保证点对点连接
+- sockfd：本地端监听的socket
+- addr：从监听队列中获取客户端的socket地址，以保证点对点连接
 如果连接成功，返回socket文件描述符，这个新的socket连接到调用connect的客户端，此后用这个新的socket与客户端进行通信
 ```
 
@@ -498,6 +568,8 @@ SO_KEEPALIVE 保持连接检测对方主机是否崩溃，避免（服务器）�
 - 两端通信时，**协议一致**，**数据的格式（数据类型、字节序）**也要一致
 - 服务端的套接字一定要使用`bind()`来绑定一个提供服务的端口，方便客户端请求
 - 使用wireshark抓包工具来分析连接情况
+
+
 
 
 

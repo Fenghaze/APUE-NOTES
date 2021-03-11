@@ -558,3 +558,25 @@ int main(int argc, char** argv)
 
 2、创建一个**匿名**的临时文件，返回一个FILE指针：`FILE *tmpfile(void)`
 
+
+
+# 3 其他常见函数
+
+## 3.1 memset
+
+
+
+## 3.2 sizeof 和 strlen 的区别
+
+- **sizeof**是关键字,在编译时就能计算出值,可以计算任何类型
+- **strlen**是函数,只有在运行时才能去计算,且只能计算`char`型的.
+
+对于char型数组,strlen是判断`'\0'`为标志结尾的,而sizeof则计算的是数组整个空间
+
+```c++
+char buf1[]="abcde";
+char buf2[30]="ABC";
+printf("buf1: %d %d\n",sizeof(buf1),strlen(buf1));	// 6,  5
+printf("buf2: %d %d\n",sizeof(buf2),strlen(buf2));	// 30, 3
+```
+
