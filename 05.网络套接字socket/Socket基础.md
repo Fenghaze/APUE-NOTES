@@ -147,37 +147,17 @@ int setsockopt(int sockfd, int level, int option_name, const void *option_value,
 
 成功时返回0，失败时返回-1并设置errno
 
-|         level          |   option_name    | 数据类型 |                        说明                         |
-| :--------------------: | :--------------: | :------: | :-------------------------------------------------: |
-| SOL_SOCKET（通用选项） |     SO_TYPE      |   int    |                   获取socket类型                    |
-|                        |    SO_RCVBUF     |   int    |         TCP接收缓冲区大小（默认256 bytes）          |
-|                        |    SO_SNDBUF     |   int    |        TCP发送缓冲区大小（默认为2048 bytes）        |
-|                        |   SO_OOBINLINE   |   int    |           将接收到的带外数据看成普通数据            |
-|                        |   SO_KEEPALIVE   |   int    |     发送周期性保活报文以维持连接（**心跳包**）      |
-|                        |   SO_BROADCAST   |   int    |                        广播                         |
-|                        | ==SO_REUSEADDR== |   int    | 重用本地地址，强制使用TIME_WAIT状态占用的socket地址 |
+|         level          |   option_name    | 数据类型 |                             说明                             |
+| :--------------------: | :--------------: | :------: | :----------------------------------------------------------: |
+| SOL_SOCKET（通用选项） |     SO_TYPE      |   int    |                        获取socket类型                        |
+|                        |    SO_RCVBUF     |   int    |       TCP接收缓冲区大小（最小256 bytes），不得小于256        |
+|                        |    SO_SNDBUF     |   int    | TCP发送缓冲区大小（最小为2048 bytes），设置后系统会**加倍**缓冲区大小 |
+|                        |   SO_OOBINLINE   |   int    |                将接收到的带外数据看成普通数据                |
+|                        |   SO_KEEPALIVE   |   int    |          发送周期性保活报文以维持连接（**心跳包**）          |
+|                        |   SO_BROADCAST   |   int    |                             广播                             |
+|                        | ==SO_REUSEADDR== |   int    |     重用本地地址，强制使用TIME_WAIT状态占用的socket地址      |
 
 
-
-# 服务端 bind
-
-将address指向的sockaddr结构体中描述的一些属性（IP地址、端口号、地址簇）与socket套接字绑定，也叫给套接字命名
-
-```c
-int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
-```
-
-- sockfd：socket的文件描述符
-- addr：sockaddr结构体指针，结构体中的IP地址一般为“0.0.0.0”
-- addrlen：结构体长度
-
-
-
-调用bind()后，就为socket套接字关联了一个相应的地址与端口号，即发送到地址值该端口的数据可通过socket读取和使用。当然也可通过该socket发送数据到指定目的。
-
-对于Server，bind()是必须要做的事情，==服务器启动时需要绑定指定的端口来提供服务==（以便于客户向指定的端口发送请求），对于服务器socket绑定地址，一般而言将IP地址赋值为INADDR_ANY（该宏值为0），**即无论发送到系统中的哪个IP地址（当服务器有多张网卡时会有多个IP地址）的请求都采用该socket来处理，而无需指定固定IP**
-
-对于Client，一般而言无需主动调用bind()，一切由操作系统来完成。在发送数据前，操作系统会为套接字随机分配一个可用的端口，同时将该套接字和本地地址信息绑定。
 
 
 
@@ -322,7 +302,7 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 
 # 流式套接字 TCP
 
-![](/assets/2020-06-25 20-34-08 的屏幕截图.png)
+![](assets/2020-06-25 20-34-08 的屏幕截图.png)
 
 
 
@@ -430,6 +410,26 @@ connect请求，实则是在建立三次握手，将这个连接任务加入未�
 
 accept只是从监听队列中取出连接，而不论连接处于何种状态
 
+## 服务端 bind
+
+将address指向的sockaddr结构体中描述的一些属性（IP地址、端口号、地址簇）与socket套接字绑定，也叫给套接字命名
+
+```c
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+```
+
+- sockfd：socket的文件描述符
+- addr：sockaddr结构体指针，结构体中的IP地址一般为“0.0.0.0”
+- addrlen：结构体长度
+
+
+
+调用bind()后，就为socket套接字关联了一个相应的地址与端口号，即发送到地址值该端口的数据可通过socket读取和使用。当然也可通过该socket发送数据到指定目的。
+
+对于Server，bind()是必须要做的事情，==服务器启动时需要绑定指定的端口来提供服务==（以便于客户向指定的端口发送请求），对于服务器socket绑定地址，一般而言将IP地址赋值为INADDR_ANY（该宏值为0），**即无论发送到系统中的哪个IP地址（当服务器有多张网卡时会有多个IP地址）的请求都采用该socket来处理，而无需指定固定IP**
+
+对于Client，一般而言无需主动调用bind()，一切由操作系统来完成。在发送数据前，操作系统会为套接字随机分配一个可用的端口，同时将该套接字和本地地址信息绑定。
+
 
 
 ## 请求connect/接受accept连接
@@ -535,7 +535,9 @@ SO_KEEPALIVE 保持连接检测对方主机是否崩溃，避免（服务器）�
 
 ## 滑动窗口
 
-实质：窗口大小指的是自己**当前读缓冲区的可用空间**
+实质：窗口大小指的是自己**当前接收缓冲区的可用空间**
+
+作用：**控制TCP传输流量**
 
 
 
@@ -553,110 +555,120 @@ SO_KEEPALIVE 保持连接检测对方主机是否崩溃，避免（服务器）�
 
 当发送端不断的快速发送数据，接收缓冲区很快填满，此时发送端无法发送数据，造成网络阻塞现象
 
-只有当接收端将缓冲区的数据提取出来，腾出一个缓冲区空间，并向发送端回应一个ACK和滑动窗口大小时，发送端才能继续发送数据
+只有当接收端将缓冲区的数据提取出来，腾出一个缓冲区空间，并向发送端回应一个ACK和==滑动窗口大小==时，发送端才能继续发送数据
 
 
 
 ![](./滑动窗口.png)
 
-# 小结
-
-- 在Linux中，网络套接字是一个文件描述符，意味着可以使用IO操作来对文件描述符进行操作
-- socket是全双工的
-- 网络套接字必须存在于两端
-- 网络套接字包含了两端通信的协议、IP、端口号
-- 两端通信时，**协议一致**，**数据的格式（数据类型、字节序）**也要一致
-- 服务端的套接字一定要使用`bind()`来绑定一个提供服务的端口，方便客户端请求
-- 使用wireshark抓包工具来分析连接情况
 
 
 
 
+# 修改网络信息
 
-# 实例：多进程版并发服务器
+## 获取主机信息
 
-父进程负责接受连接，创建多个子进程来处理每个连接
+```c++
+#include＜netdb.h＞
+struct hostent* gethostbyname(const char* name);
+// 根据主机名称获取主机的完整信息
 
-子进程处理数据
+struct hostent* gethostbyaddr(const void* addr,size_t len,int type);
+// 根据IP地址获取主机的完整信息
 
-> ./parrlel/server.c
+- name：主机名
+- addr：IP地址
+- type：AF_INET等
+```
 
+返回的都是hostent结构体类型的指针，hostent结构体的定义如下：
 
-
-# ==并发服务器：IO多路转接==
-
-**详见【01.IO操作/高级IO】**
-
-IO多路转接：实现文件描述符的监视，当文件描述符状态发生改变时，再执行相应的操作
-
-并发服务器是接受多个客户端的请求，对每个客户端的socket进行操作
-
-**socket的本质是文件描述符，所以可以使用多路转接来监视多个客户端的socket变化**
-
-（服务器委托内核调用相关函数，来监听多个socket）
-
-==实现步骤：==
-
-- 1、布置监视任务
-- 2、选择监视函数对socket进行监视（select、poll、==epoll==）
-- 3、根据监视的结果来执行相应的操作
-
-
-
-# ==线程池：生产者消费者模型==
-
-常用在服务端处理数据
-
-当服务端接收到多个客户端发送来的数据时，需要对每个客户端的数据进行单独处理，会用到线程池
-
---------------------------------------------------------------------------------------------------------------------------------------------
-
-线程池：一堆已经启动了的线程
-
-- 静态线程池：能创建的线程有固定数量
-- 动态线程池：有下限和上限，会因为客户端的数量在这个区间内动态扩张/缩减（定义步长）
-  - 什么时候扩张/缩减？单独用一个线程来管理
-  - 定义两个变量：当前存活的线程数、当前运行的线程数；根据比例来进行扩张/缩减
+```c++
+#include＜netdb.h＞
+struct hostent
+{
+    char *h_name;		/*主机名*/
+    char** h_aliases;	/*主机别名列表，可能有多个*/
+    int h_addrtype;		/*地址类型（地址族）*/
+    int h_length;		/*地址长度*/
+    char **h_addr_list	/*按网络字节序列出的主机IP地址列表*/
+};
+```
 
 
 
-服务端维护着一个**任务队列**，当有客户端发送数据给服务端时，服务端相当于接到了一个任务，将这个客户端fd放入到任务队列中，然后让线程池中的所有线程来抢这个任务进行处理
+## 获取网络服务信息
+
+```c++
+#include＜netdb.h＞
+struct servent *getservbyname(const char *name, const char *proto);
+// 根据名称获取某个服务的完整信息
+
+struct servent *getservbyport(int port, const char *proto);
+// 根据端口号获取某个服务的完整信息
+
+- name：网络服务名
+- proto：要获取的服务类型。tcp、udp、NULL表示获取所有类型的服务
+- port：端口号
+```
+
+两个函数返回的都是servent结构体类型的指针，结构体servent的定义如下：
+
+```c++
+#include＜netdb.h＞
+struct servent
+{
+    char *s_name;		/*服务名称*/
+    char **s_aliases;	/*服务的别名列表，可能有多个*/
+    int s_port;			/*端口号*/
+    char *s_proto;		/*服务类型,通常是tcp或者udp*/
+};
+```
 
 
 
-任务队列是临界资源，需要互斥锁
+## 获取主机或网络服务信息
 
-任务队列的情况：
+```c++
+#include＜netdb.h＞
+int getaddrinfo(const char* hostname, const char* service, const struct addrinfo *hints, struct addrinfo **result);
 
-- 任务队列为空：线程池等待阻塞（直到任务队列有任务才开始取任务）
-- 任务队列满：服务端等待阻塞（直到任务队列不满才开始接收客户端的新任务）
-
-
-
-> 【示例】：./thread_pool/pool.c
+int getnameinfo(const struct sockaddr *sockaddr, socklen_t addrlen, char *host, socklen_t hostlen, char *serv, socklen_t servlen, int flags);
+```
 
 
 
-# 开源库
-
-常见的开源库：libevent、libev（libevent的升级版，增加了线程）
 
 
+# 常用工具、命令
 
-## 开源库的一般使用方式
-
-查看README
-
-- 执行`./configure`：检查当前主机环境是否适合安装，自动生成makefile
-- 执行`make`：编译
-- 执行`sudo make install`
-- simple目录是例子
+## netstat：查看网络状态
 
 
 
-# 抓包工具 
+## telent：模拟客户端
+
+
+
+## nc：模拟服务端
+
+
+
+## tcpdump：抓包
+
+```shell
+sudo tcpdum -nt -i lo port 12345
+# lo：网卡名称
+```
+
+
 
 ## Wireshark
+
+```shell
+sudo wireshark
+```
 
 过滤器的使用：可以过滤一个或多个条件，条件用and连接
 
@@ -671,5 +683,15 @@ IO多路转接：实现文件描述符的监视，当文件描述符状态发生
 
 
 
-## Linux下使用tcpdump命令
+# 小结
+
+- 在Linux中，网络套接字是一个文件描述符，意味着可以使用IO操作来对文件描述符进行操作
+- socket是全双工的
+- 网络套接字必须存在于两端
+- 网络套接字包含了两端通信的协议、IP、端口号
+- 两端通信时，**协议一致**，**数据的格式（数据类型、字节序）**也要一致
+- 服务端的套接字一定要使用`bind()`来绑定一个提供服务的端口，方便客户端请求
+- 使用抓包工具来分析连接情况
+
+
 

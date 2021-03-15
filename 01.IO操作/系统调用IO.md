@@ -295,11 +295,19 @@ int main(int argc, char** argv)
 
 将fd复制一份到当前可用范围内最小的文件描述符，返回一个新的fd（创建一个新的fd，这个fd与参数fd指向同一个文件）
 
-
-
-`int dup2(int fd, int fd2);`
+`int dup2(int oldfd, int newfd2);`
 
 先将fd2关闭，然后将fd复制一份到指定的文件描述符fd2（fd2指向fd的文件）
+
+
+
+调用失败返回-1，并设置errno；两个函数创建的文件描述符并不继承源文件描述符的**属性**
+
+
+
+应用：
+
+- 将标准输入重定向到一个文件，或者把标准输出重定向到一个网络连接
 
 
 
@@ -307,10 +315,10 @@ int main(int argc, char** argv)
 
 执行一个shell命令行时通常会自动打开三个标准文件：
 
-- 标准输入文件（stdin），通常对应终端的键盘，fd=0
+- 标准输入文件（stdin/STDIN_FILENO），通常对应终端的键盘，fd=0
 
-- 标准输出文件（stdout），通常对应终端的屏幕，fd=1
-- 标准错误输出文件（stderr），通常对应终端的屏幕，fd=2
+- 标准输出文件（stdout/STDOUT_FILENO），通常对应终端的屏幕，fd=1
+- 标准错误输出文件（stderr/STDERR_FILENO），通常对应终端的屏幕，fd=2
 
 进程从标准输入文件中得到输入数据，将正常输出数据输出到标准输出文件，而将错误信息送到标准错误文件中。
 
@@ -365,7 +373,7 @@ dup2(fd, 2);
 
 # 8 ==fcntl()==，ioctl()
 
-`fcntl()`：文件描述符相关的魔术都来源于这个函数
+`fcntl()`：文件描述符各种控制操作都来源于这个函数
 
 ```c++
 #include<fcntl.h>
@@ -375,23 +383,40 @@ int fcntl(int fd, int cmd,...);
 失败返回-1并设置errno
 ```
 
+常用操作及其参数：
+
+|            操作分类            |     操作符      |                             含义                             | 第三个参数类型 | 成功时的返回值 |
+| :----------------------------: | :-------------: | :----------------------------------------------------------: | :------------: | :------------: |
+|         复制文件描述符         |     F_DUPFD     |                    创建一个新的文件描述符                    |      long      |   新创建的fd   |
+|                                | F_DUPFD_CLOEXEC |       创建一个新的文件描述符，设置其close-on-exec标志        |      long      |   新创建的fd   |
+|   获取和设置文件描述符的标志   |     F_GETFD     |              获取fd的标志，如close-on-exec标志               |       -        |    fd的标志    |
+|                                |     F_SEDFD     |                         设置fd的标志                         |      long      |       0        |
+| 获取和设置文件描述符的状态标志 |     F_GETFL     | 获取fd的状态标志，包括open系统调用设置的标志O_APPEND、O_CREAT；访问模式O_RDONLY、O_WRONLY、O_RDWR |      void      |  fd的状态标志  |
+|                                |     F_SETFL     |           设置fd的状态标志，访问模式的标志不可修改           |      long      |       0        |
+
+
+
+
+
 在网络编程中，一般会使用`fcntl()`将一个文件描述符设置为非阻塞的：
 
 ```c++
 int setnonblocking(int fd)
 {
-    int flag = fcntl(fd, F_GETFL);	//获取fd旧的状态标志
-    flag = flag | O_NONBLOCK;		//更新为非阻塞标志
-    fcntl(fd, F_SETFL, flag);		//将fd设置为非阻塞
+    int old_option = fcntl(fd, F_GETFL);	//获取fd旧的状态标志
+    int new_option = flag | O_NONBLOCK;		//设置为非阻塞标志
+    fcntl(fd, F_SETFL, new_option);		//将fd设置为非阻塞
+    return old_option; 	//返回fd旧的状态标志，以便日后恢复该状态标志
 }
 ```
 
 
 
-`ioctl()`：设备相关的内容由这个函数来管理
+`ioctl()`：比fcntl能够执行更多的控制，设备相关的内容由这个函数来管理
 
 
 
 # 9 /dev/fd/目录
 
 这是一个虚目录，显示的是当前进程的文件描述符信息
+

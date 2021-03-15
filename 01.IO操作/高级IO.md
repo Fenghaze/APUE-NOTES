@@ -448,6 +448,8 @@ main线程来监听lfd，设计一个线程池来处理任务
 
 # 4 readv、writev
 
+简化版的recvmsg、sendmsg函数
+
 ```c
 #include<sys/uio.h>
 
@@ -456,6 +458,24 @@ ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
 
 // 将多块分散的内存数据一并写入到文件描述符中，即集中写
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+```
+
+- fd：被操作的目标文件描述符
+- iov：iovec结构体数组，描述一块内存区
+- iovcnt：数组长度，表示有多少块内存数据需要从fd读或写
+
+成功返回读、写字节数，失败返回-1并设置errno
+
+
+
+iovec结构体定义如下：
+
+```c++
+struct iovec
+{
+	void *iov_base;/*内存起始地址*/
+	size_t iov_len;/*这块内存的长度*/
+};
 ```
 
 
@@ -480,24 +500,68 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
 
 
 
-# pipe
+# 管道 pipe
+
+管道用于==进程间通信==
 
 详见【../03.多进程、管道/进程间通信.md】
+
+```c++
+#include＜unistd.h＞
+int pipe(int fd[2]);
+```
+
+创建2个文件描述符：fd[0]从管道读出数据（读端），fd[1]往管道写入数据（写端），不能反过来使用，且这两个文件描述符默认是阻塞的
+
+管道传输的是字节流，默认大小是65536字节
+
+
+
+## socketpair
+
+用于创建双向管道
+
+```c++
+#include＜sys/types.h＞
+#include＜sys/socket.h＞
+int socketpair(int domain,int type,int protocol,int fd[2]);
+```
+
+- domain：AF_UNIX，只能在UNIX本地使用双向管道
+- fd[0]和fd[1]可读可写
+
+
+
+## tee
+
+tee函数在==两个管道==文件描述符之间复制数据，也是==零拷贝操作==。它不消耗数据，因此源文件描述符上的数据仍然可以用于后续的读操作
+
+```c++
+#include＜fcntl.h＞
+ssize_t tee(int fd_in, int fd_out, size_t len, unsigned int flags);
+```
+
+- fd_in/fd_out：必须是管道文件描述符，管道读端读取/输出到管道写端
+- 该函数其他参数与splice相同
+
+tee函数成功时返回在两个文件描述符之间复制的数据数量（字节数）。返回0表示没有复制任何数据。tee失败时返回-1并设置errno
+
+Linux命令tee程序（同时输出数据到终端和文件的程序）可使用tee函数和splice函数实现
 
 
 
 # splice
 
-splice函数在内核中实现**两个文件描述符之间移动数据**，也是零拷贝操作。splice函数的定义如下:
+splice函数在内核中实现**两个文件描述符之间移动数据**，也是==零拷贝==操作。splice函数的定义如下:
 
 ```c
 #define _GNU_SOURCE         /* See feature_test_macros(7) */
 #include <fcntl.h>
 
 ssize_t splice(int fd_in, loff_t *off_in, int fd_out,loff_t *off_out, size_t len, unsigned int flags);
-- fd_in：待输入数据的fd；
+- fd_in：待输入数据的fd，从哪里读取数据
 - off_in：如果fd_in是一个管道文件描述符，则该参数为NULL；如果fd_in是socket，则表示从输入数据流的何处开始读取数据（偏移量），NULL表示从当前位置开始读入
-- fd_out/off_out：用于输出数据流
+- fd_out/off_out：用于输出数据流，定向到哪个文件描述符
 - len：指定移动数据的长度
 - flags：控制数据如何移动
     - SPLICE_F_MOVE：按整页内存移动数据
@@ -509,7 +573,7 @@ ssize_t splice(int fd_in, loff_t *off_in, int fd_out,loff_t *off_out, size_t len
 
 splice函数调用成功时返回移动字节的数量。它可能返回0，表示没有数据需要移动，这发生在从管道中读取数据（fd_in是管道文件描述符）而该管道没有被写入任何数据时。
 
-splice函数失败时返回-1并设置errno
+splice函数失败时返回-1并设置errno：
 
 
 
@@ -521,22 +585,35 @@ splice函数失败时返回-1并设置errno
 
 ## 5.1 mmap、munmap
 
+mmap函数用于申请一段内存空间。我们可以将这段内存作为==进程间通信的共享内存==，也可以将文件直
+接映射到其中。
+
 `void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);`
 
-- addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配
+- addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配，否则必须是内存页面大小（4096字节）的整数倍
 - length：映射区长度
 - prot：映射区的操作权限（读/写）
-- flags：权限（共享、私有）
-- fd：文件描述符，打开要映射的文件
+  - PROT_READ，内存段可读。
+  - PROT_WRITE，内存段可写。
+  - PROT_EXEC，内存段可执行。
+  - PROT_NONE，内存段不能被访问。
+
+- flags：控制内存段内容被修改后程序的行为
+  - MAP_SHARED：在进程间共享这段内存。对该内存段的修改将同时影响被映射的文件
+  - MAP_PRIVATE：内存段为调用进程所私有。对该内存段的修改不会影响被映射的文件
+  - MAP_ANONYMOUS：这段内存不是从文件映射而来，其内容初始化为0，mmap最后两个参数忽略
+  - MAP_FIXED：内存段必须位于addr参数指定的地址处。
+  - MAP_HUGETLB：按照“大内存页面”来分配内存
+- fd：文件描述符，打开要映射的文件 ，一般通过open系统调用获得
 - offset：指定要映射文件的偏移量
 
-如果成功，返回创建的映射区首地址；失败，返回MAP_FAILED宏
+如果成功，返回创建的映射区首地址；失败，返回MAP_FAILED宏，并设置errno
 
 
+
+munmap函数则释放由mmap创建的这段内存空间
 
 `int munmap(void *addr, size_t length);`
-
-解除映射
 
 
 
