@@ -361,6 +361,242 @@ dup2(fd, 2);
 
 
 
+# readv、writev
+
+简化版的recvmsg、sendmsg函数
+
+```c
+#include<sys/uio.h>
+
+// 将数据从文件描述符读到分散的内存块中，即分散读
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
+
+// 将多块分散的内存数据一并写入到文件描述符中，即集中写
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+```
+
+- fd：被操作的目标文件描述符
+- iov：iovec结构体数组，描述一块内存区
+- iovcnt：数组长度，表示有多少块内存数据需要从fd读或写
+
+成功返回读、写字节数，失败返回-1并设置errno
+
+
+
+iovec结构体定义如下：
+
+```c++
+struct iovec
+{
+	void *iov_base;/*内存起始地址*/
+	size_t iov_len;/*这块内存的长度*/
+};
+```
+
+
+
+# sendfile
+
+sendfile函数在两个文件描述符之间直接传递数据（完全在内核中操作），从而==避免了内核缓冲区和用
+户缓冲区之间的数据拷贝，效率很高，这被称为零拷贝==。sendfile函数的定义如下：
+
+```c++
+#include <sys/sendfile.h>
+// 将文件发送给cfd
+ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
+- out_fd：待写入内容的文件描述符，必须是一个socket
+- in_fd：真实文件的文件描述符，类似mmap函数的文件描述符
+- offset:待读出内容的文件流偏移量，NULL表示从头开始读
+- count:指定在文件描述符in_fd和out_fd之间传输的字节数
+成功，返回传输的字节数；失败返回-1并设置errno
+```
+
+**sendfile()几乎是专门为在网络上传输文件而设计的**
+
+
+
+# 管道 pipe
+
+管道用于==进程间通信==
+
+详见【../03.多进程、管道/进程间通信.md】
+
+```c++
+#include＜unistd.h＞
+int pipe(int fd[2]);
+```
+
+创建2个文件描述符：fd[0]从管道读出数据（读端），fd[1]往管道写入数据（写端），不能反过来使用，且这两个文件描述符默认是阻塞的
+
+管道传输的是字节流，默认大小是65536字节
+
+
+
+## socketpair
+
+用于创建双向管道
+
+```c++
+#include＜sys/types.h＞
+#include＜sys/socket.h＞
+int socketpair(int domain,int type,int protocol,int fd[2]);
+```
+
+- domain：AF_UNIX，只能在UNIX本地使用双向管道
+- fd[0]和fd[1]可读可写
+
+
+
+## tee
+
+tee函数在==两个管道==文件描述符之间复制数据，也是==零拷贝操作==。它不消耗数据，因此源文件描述符上的数据仍然可以用于后续的读操作
+
+```c++
+#include＜fcntl.h＞
+ssize_t tee(int fd_in, int fd_out, size_t len, unsigned int flags);
+```
+
+- fd_in/fd_out：必须是管道文件描述符，管道读端读取/输出到管道写端
+- 该函数其他参数与splice相同
+
+tee函数成功时返回在两个文件描述符之间复制的数据数量（字节数）。返回0表示没有复制任何数据。tee失败时返回-1并设置errno
+
+Linux命令tee程序（同时输出数据到终端和文件的程序）可使用tee函数和splice函数实现
+
+
+
+# splice
+
+splice函数在内核中实现**两个文件描述符之间移动数据**，也是==零拷贝==操作。splice函数的定义如下:
+
+```c
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
+#include <fcntl.h>
+
+ssize_t splice(int fd_in, loff_t *off_in, int fd_out,loff_t *off_out, size_t len, unsigned int flags);
+- fd_in：待输入数据的fd，从哪里读取数据
+- off_in：如果fd_in是一个管道文件描述符，则该参数为NULL；如果fd_in是socket，则表示从输入数据流的何处开始读取数据（偏移量），NULL表示从当前位置开始读入
+- fd_out/off_out：用于输出数据流，定向到哪个文件描述符
+- len：指定移动数据的长度
+- flags：控制数据如何移动
+    - SPLICE_F_MOVE：按整页内存移动数据
+    - SPLICE_F_NONBLOCK：非阻塞splice操作
+    - SPLICE_F_MORE：给内核一个提示，后续的splice调用将读取更多数据
+```
+
+使用splice函数时，==fd_in和fd_out必须至少有一个是管道文件描述符==。
+
+splice函数调用成功时返回移动字节的数量。它可能返回0，表示没有数据需要移动，这发生在从管道中读取数据（fd_in是管道文件描述符）而该管道没有被写入任何数据时。
+
+splice函数失败时返回-1并设置errno：
+
+
+
+# 5 存储映射IO
+
+把磁盘的文件的某块内容映射到当前进程虚拟空间中，==可用于进程间通信==
+
+
+
+## 5.1 mmap、munmap
+
+mmap函数用于申请一段内存空间。我们可以将这段内存作为==进程间通信的共享内存==，也可以将文件直
+接映射到其中。
+
+`void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);`
+
+- addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配，否则必须是内存页面大小（4096字节）的整数倍
+- length：映射区长度
+- prot：映射区的操作权限（读/写）
+  - PROT_READ，内存段可读。
+  - PROT_WRITE，内存段可写。
+  - PROT_EXEC，内存段可执行。
+  - PROT_NONE，内存段不能被访问。
+
+- flags：控制内存段内容被修改后程序的行为
+  - MAP_SHARED：在进程间共享这段内存。对该内存段的修改将同时影响被映射的文件
+  - MAP_PRIVATE：内存段为调用进程所私有。对该内存段的修改不会影响被映射的文件
+  - MAP_ANONYMOUS：这段内存不是从文件映射而来，其内容初始化为0，mmap最后两个参数忽略
+  - MAP_FIXED：内存段必须位于addr参数指定的地址处。
+  - MAP_HUGETLB：按照“大内存页面”来分配内存
+- fd：文件描述符，打开要映射的文件 ，一般通过open系统调用获得
+- offset：指定要映射文件的偏移量
+
+如果成功，返回创建的映射区首地址；失败，返回MAP_FAILED宏，并设置errno
+
+
+
+munmap函数则释放由mmap创建的这段内存空间
+
+`int munmap(void *addr, size_t length);`
+
+
+
+> 【示例1】映射文件到当前进程：mmap.c
+
+> 【示例2】使用匿名映射到父子进程，子进程写父进程读：fork_mmap.c
+>
+> 【示例3】无血缘关系进程间通信
+
+
+
+==注意事项：==
+
+- 映射区大小不能为0（不能在open的时候使用O_CREATE创建一个**空文件**映射到进程空间）
+- 映射区的权限 **<=** 文件打开权限
+- 创建映射区时，文件至少需要有**读的权限**
+- 文件偏移量参数，必须是4K的整数倍（CPU的MMU单元负责内存映射，映射单位是4K）
+
+
+
+## 5.2 匿名映射区
+
+在之前的映射时，每次创建映射区一定要依赖一个打开的文件才能实现
+
+通常为了建立一个映射区，要open一个文件，创建好映射区后，再close文件，比较麻烦
+
+Linux系统提供了创建匿名映射区的办法，无需依赖一个文件即可创建映射区，需要指定flags参数
+
+flags=`MAP_SHARED|MAP_ANONYMOUS`
+
+```c
+int *p = mmap(NULL, 4, PROT_READ, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+// 映射区长度任意；文件描述符为-1，不使用文件
+```
+
+
+
+由于这个匿名映射的宏是Linux提供的，因此不适用于其他操作系统
+
+这时，可以使用`/dev/zero`文件来创建映射区，这个文件的大小是无限大的，给一指定任意长度，和`/dev/null`文件相对应
+
+```c
+fd = open("/dev/zero", O_RDWR);
+p = mmap(NULL, size, PROT_READ, MMAP_SHARED, fd, 0);
+```
+
+
+
+# 6 文件锁
+
+对文件进行加锁，防止产生竞争冲突
+
+```c
+int fcntl(int fd, int cmd, ... /* arg */ );
+
+int lockf(int fd, int cmd, off_t len);
+
+int flock(int fd, int operation);
+```
+
+
+
+> 【示例】20个子进程写同一个文件：add.c
+
+
+
+
+
 # 7 同步：sync，fsync，fdatasync
 
 同步buffer和cache：`sync`

@@ -104,39 +104,16 @@ epoll; // 是poll在Linux封装的方言
 
 `int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);`
 
-fd_set是位图，如
+成功，返回监听集合中状态发生变化的文件描述符个数，内核将自动修改文件描述符集合来通知应用程序哪些文件描述符已经就绪；如果失败，返回-1和errno
 
 - nfds：监视的最大文件描述符+1
 - readfds：文件描述符是否可读的集合（监听集合中的文件描述符的读事件）
 - writefds：文件描述符是否可写的集合
 - exceptfds：异常文件描述符的集合
-- timeout：超时设置，NULL（永久监听），0（不等待，立即返回）
+- timeout：超时设置。NULL（select阻塞，永久监听），0（不等待，立即返回）
+- ==fd_set==结构体包含一个整型数组，数组长度由FD_SETSIZE指定，该数组中的每个元素的每一位（bit）标记一个文件描述符，表示==位图==
 
-如果成功，返回监听集合中状态发生变化的文件描述符个数；如果失败，返回-1和errno
-
-==当有文件描述符可读/可写的时候，监听集合就发生变化==
-
-
-
-**问题1：当有新的客户端要请求连接服务端时，需要监听哪个`socket`，加入哪个集合？**
-
-对于服务端而言，新的客户端加入时，监听的是服务端的`socket`，加入可读集合
-
-**问题2：客户端向服务端发送数据，这对于服务端中使用`select`监听的socket而言，是加入哪个集合？**
-
-客户端使用`send`或`write`对socket写入数据后（相当于发送了数据）；于服务端而言，连接到的socket中就有内容了，于是服务端监听的socket==可读==，即加入可读集合
-
-**问题:3：如何将需要监听的文件描述符添加到各个集合中？**
-
-先调用`FD_ZERO`，再`FD_SET`，此时集合中的文件描述符对应的位图置1
-
-**问题4：对于成功返回的文件描述符个数，如何区分哪个fd来自与哪个集合？**
-
-当内核监听到有文件描述符的状态发生变化时（如readfds初始监听3个文件描述符，对应位图为111；有读事件发生，readfds位图变为001），内核自动将变化后的集合返回给用户
-
-用户可以使用for循环，调用`FD_ISSET`来判断集合中是否存在fd，从而判断这个fd的状态是否发生变化
-
-**补充：当有监听事件发生时，集合都会发生变化，内核会将变化后的集合覆盖到用户空间，而下一次开始新的监听时，仍然是要监听原来的事件，此时可以做一个备份集合，这个备份集合保存的是一直要监听的文件描述符**
+使用下面的一系列宏来控制fd_set结构体中的位：
 
 ```c
 void FD_ZERO(fd_set *set);			//将集合清空
@@ -147,6 +124,55 @@ void FD_SET(int fd, fd_set *set);	//将一个fd添加到set中
 
 int  FD_ISSET(int fd, fd_set *set);	//判断fd是否在集合中
 ```
+
+
+
+==当有文件描述符可读/可写的时候，监听集合就发生变化==
+
+
+
+**问题1：当有新的客户端要请求连接服务端时，需要监听哪个`socket`，加入哪个集合？**
+
+对于服务端而言，新的客户端加入时，监听的是服务端的`socket`，加入readfds可读集合
+
+**问题2：客户端向服务端发送数据，这对于服务端中使用`select`监听的socket而言，是加入哪个集合？**
+
+客户端使用`send`或`write`对socket写入数据后（相当于发送了数据）；于服务端而言，连接到的socket中就有内容了，于是服务端监听的socket==可读==，即加入readfds可读集合
+
+**问题:3：如何将需要监听的文件描述符添加到各个集合中？**
+
+先调用`FD_ZERO`，再`FD_SET`，此时集合中的文件描述符对应的==位图置1==
+
+**问题4：对于成功返回的文件描述符个数，如何区分哪个fd来自与哪个集合？**
+
+当内核监听到有文件描述符的状态发生变化时（如readfds初始监听3个文件描述符，对应位图为111；有一个读事件发生，readfds位图变为001），内核自动将变化后的集合返回给用户
+
+用户可以使用for循环，调用`FD_ISSET`来判断集合中是否存在fd，从而判断这个fd的状态是否发生变化
+
+**问题5：文件描述符可读情况？**
+
+- socket内核接收缓存区中的字节数大于或等于其低水位标记SO_RCVLOWAT。此时我们可以无阻塞
+  地读该socket，并且读操作返回的字节数大于0。
+- socket通信的对方关闭连接。此时对该socket的读操作将返回0。
+- 监听socket上==有新的连接请求==。
+- 连接socket接收到数据
+- socket上有未处理的错误。此时我们可以使用getsockopt来读取和清除该错误
+
+**问题6：文件描述符可写情况？**
+
+- socket内核发送缓存区中的可用字节数大于或等于其低水位标记SO_SNDLOWAT。此时我们可以无
+  阻塞地写该socket，并且写操作返回的字节数大于0。
+- socket的写操作被关闭。对写操作被关闭的socket执行写操作将触发一个SIGPIPE信号。
+- 客户端socket使用非阻塞connect连接成功或者失败（超时）之后。
+- socket上有未处理的错误。此时我们可以使用getsockopt来读取和清除该错误。
+
+**问题7：文件描述符异常情况？**
+
+socket上接收到==带外数据==
+
+
+
+**补充：当有监听事件发生时，集合都会发生变化，内核会将变化后的集合复制到用户空间，而下一次开始新的监听时，仍然是要监听原来的事件，此时可以做一个备份集合，这个备份集合保存的是一直要监听的文件描述符**
 
 
 
@@ -173,11 +199,11 @@ while(1){
 
 在判断cfd的状态是否在监听集合中，方法是遍历所有已连接套接字【lfd+1， maxfd】，一个一个遍历是否在可读集合中
 
-在Linux中，默认监听的最大描述符个数为1024
+==在Linux中，默认监听的最大描述符个数为1024==
 
 
 
-一种情况是，监听【3，1023】的文件描述符，在运行过程中，一些客户端关闭了端口，此时仍然需要循环多次来判断处理，效率很低，需要优化；
+**一种情况是**，监听【3，1023】的文件描述符，在运行过程中，一些客户端关闭了端口，此时仍然需要循环多次来判断处理，效率很低，需要优化；
 
 【优化方法】
 
@@ -193,7 +219,7 @@ while(1){
 
 
 
-另一种情况是，监听【3，1023】的文件描述符，其中只有少部分的socket经常发来消息，而其他的socket偶尔发送消息且并没有关闭，出现了资源浪费，==无法优化（select缺陷：大量并发，少量活跃）==
+**另一种情况是**，监听【3，1023】的文件描述符，其中只有少部分的socket经常发来消息，而其他的socket偶尔发送消息且并没有关闭，出现了资源浪费，==无法优化（select缺陷：大量并发，少量活跃）==
 
 
 
@@ -211,22 +237,32 @@ while(1){
 
 ## 3.2 poll
 
+poll系统调用和select类似，也是在指定时间内轮询一定数量的文件描述符
+
 `int poll(struct pollfd *fds, nfds_t nfds, int timeout);`
 
 - fds：存放了文件描述符及其事件的结构体数组的起始地址
 - nfds：数组中文件描述符个数
 - timeout：超时设置
 
+成功，返回监听集合中状态发生变化的文件描述符个数，内核将自动修改revents来通知应用程序哪些文件描述符已经就绪；如果失败，返回-1和errno
+
 ```c
 struct pollfd {
-    int   fd;         /* file descriptor */
-    short events;     /* 要监听的事件：POLLIN/POLLOUT/POLLERR */
-    short revents;    /* 当监听到某事件后，会自动赋值,初始化为0 */
+    int   fd;      /* file descriptor */
+    short events;  /* 要监听的事件按位或：POLLIN/POLLOUT/POLLERR */
+    short revents; /* 当监听到某事件后，内核会自动修改，通知应用程序fd上实际发生了哪些事件,初始化为0 */
 };
-- POLLIN：可读
-- POLLOUT：可写
-- POLLHUP：客户端关闭连接
-- POLLERR：异常
+触发情况：
+- POLLIN：可读（普通数据和优先数据）
+    - POLLRDNORM：普通数据可读
+    - POLLPRI：优先级数据可读，如TCP带外数据
+- POLLOUT：可写（普通数据和优先数据）
+    - POLLWRNORM：普通数据可写
+    - POLLWRBAND：优先级数据可写
+- POLLRDHUP：客户端关闭连接/客户端关闭写操作
+- POLLHUP：挂起，如管道写端被关闭后，读端fd上将收到POLLHUP事件
+- POLLERR：错误
 ```
 
 > 例子：poll.c
@@ -239,14 +275,14 @@ struct pollfd {
 
 ## 3.3 ==epoll==
 
-epoll是Liunx的方言，是select/poll的增强版本
+epoll是Liunx的方言，是select/poll的增强版本，使用一组函数来完成任务。**epoll把用户关心的文件描述符上的事件放在内核里的一个事件表中，而无须像select和poll那样每次调用都要重复传入文件描述符集或事件集**
 
 epoll的存储结构是一棵**红黑树**
 
 优点：
 
 - 没有文件描述符个数限制
-- 已经添加到红黑树上的cfd，如果状态变化，会自动存储到监听事件中；当开始新一轮监听时，不需要重新将cfd添加到红黑树中
+- 已经添加到红黑树上的cfd，如果状态变化，会自动存储到监听事件数组events中；当开始新一轮监听时，不需要重新将cfd添加到红黑树中
 - 监听到文件描述符变化后，返回的是已经变化的文件描述符，不需要像select对文件描述符进行判断其是否在可读集合中
 
 ```c
@@ -256,7 +292,7 @@ int epoll_create(int size);
 成功，返回一个epfd（epfd是一棵红黑树的根节点，有size个文件描述符作为结点）
 
 // 2、设置epoll：在红黑树上添加需要监听的文件描述符
-int  epoll_ctl(int  epfd,  int  op,  int  fd,  struct epoll_event *event);
+int  epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
 - op：对红黑树中的结点进行的操作（增加/删除/修改文件描述符结点）
     -  EPOLL_CTL_ADD:添加结点
     -  EPOLL_CTL_MOD:修改结点
@@ -265,17 +301,17 @@ int  epoll_ctl(int  epfd,  int  op,  int  fd,  struct epoll_event *event);
     -  EPOLLIN：读事件
     -  EPOLLOUT：写事件
     -  EPOLLERR：错误事件
-成功返回0，失败返回-1
+成功返回0，失败返回-1并设置errno
 
 // 3、监听等待，相当于select()
 int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
 - epfd：文件描述符，红黑树根节点
-- events：监听事件结构体数组的首地址（数组需要提前定义，元素是红黑树上每个结点的监听事件结构体）
-- maxevents：数组元素个数
+- events：监听事件结构体数组的首地址（数组需要提前定义）
+- maxevents：数组元素个数，最多监听多少个事件
 - timeout：超时等待
-成功，返回监听到的文件描述符个数，内核空间会将监听到的结构体复制一份存放到用户空间定义的结构体数组中，用户只需要对这个结构体数组进行操作即可
+成功，返回监听到的文件描述符个数，内核空间会将监听到的就绪事件复制一份存放到用户空间定义的第二个参数events结构体数组中，用户只需要对这个结构体数组进行操作即可；失败返回-1并设置errno
 
-// 结构体
+// 联合体
 typedef union epoll_data {
     void        *ptr;	// 应用于epoll反应堆模型
     int          fd;	// 监听的文件描述符
@@ -298,7 +334,7 @@ struct epoll_event {
 2、绑定
 3、监听
 4、创建红黑树根节点
-5、将lfd添加到红黑树
+5、将lfd添加到红黑树，设置为可读事件
 while(1){  
     （1）epoll_wait()//监听红黑树
     （3）判断集合变化：
@@ -313,7 +349,39 @@ epoll_events中的events成员是一个位图，当监听到事件后，文件�
 
 
 
+### epoll和poll的区别
+
+```c++
+/*如何索引poll返回的就绪文件描述符*/
+int ret=poll(fds,MAX_EVENT_NUMBER,-1);
+/*必须遍历所有已注册文件描述符并找到其中的就绪者（当然，可以利用ret来稍做优化）*/
+for(int i=0;i＜MAX_EVENT_NUMBER;++i)
+{
+	if(fds[i].revents＆POLLIN)/*判断第i个文件描述符是否就绪*/
+    {
+    	int sockfd=fds[i].fd;
+    	/*处理sockfd*/
+    }
+}
+
+/*如何索引epoll返回的就绪文件描述符*/
+int ret=epoll_wait(epollfd,events,MAX_EVENT_NUMBER,-1);
+/*仅遍历就绪的ret个文件描述符*/
+for(int i=0;i＜ret;i++)
+{
+    int sockfd=events[i].data.fd;
+    /*sockfd肯定就绪，直接处理*/
+}
+```
+
+- poll模型：所有文件描述符及其事件存放在一个结构体数组fds中，当poll函数返回成功时，需要遍历fds先判断每个fd的可读可写情况，再进行读/写操作
+- epoll模型：文件描述符及其事件是一个红黑树节点，用户定义了一个events数组，当epoll_wait函数返回成功时，红黑树上监听的节点事件会自动发生变化，同时内核空间会将监听到的就绪事件复制一份存放到events结构体数组中，遍历events数组进行读/写操作
+
+
+
 ### epoll触发模式
+
+不同的触发模式会影响epoll_wait函数的执行次数
 
 - 水平触发（电平一直为0或1就触发）：EPOLLLT（默认）
   - **读缓冲区只要有数据就会被触发；写缓冲区只要可写就会被触发**
@@ -339,7 +407,7 @@ fcntl(cfd, F_SETFL, flag);
 
 **当read的返回值为-1,并且errno的值被设置为EAGAIN时,代表缓冲区被读取干净**
 
-在实际工作中，通常采用边沿触发+epoll非阻塞
+可见，==ET模式在很大程度上降低了同一个epoll事件被重复触发的次数，因此效率要比LT模式高，在实际工作中，通常采用边沿触发+epoll非阻塞==
 
 
 
@@ -444,237 +512,4 @@ main线程来监听lfd，设计一个线程池来处理任务
 
 > 示例：./epoll_reactor/reactor.c
 
-
-
-# 4 readv、writev
-
-简化版的recvmsg、sendmsg函数
-
-```c
-#include<sys/uio.h>
-
-// 将数据从文件描述符读到分散的内存块中，即分散读
-ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
-
-// 将多块分散的内存数据一并写入到文件描述符中，即集中写
-ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
-```
-
-- fd：被操作的目标文件描述符
-- iov：iovec结构体数组，描述一块内存区
-- iovcnt：数组长度，表示有多少块内存数据需要从fd读或写
-
-成功返回读、写字节数，失败返回-1并设置errno
-
-
-
-iovec结构体定义如下：
-
-```c++
-struct iovec
-{
-	void *iov_base;/*内存起始地址*/
-	size_t iov_len;/*这块内存的长度*/
-};
-```
-
-
-
-# sendfile
-
-sendfile函数在两个文件描述符之间直接传递数据（完全在内核中操作），从而==避免了内核缓冲区和用
-户缓冲区之间的数据拷贝，效率很高，这被称为零拷贝==。sendfile函数的定义如下：
-
-```c++
-#include <sys/sendfile.h>
-// 将文件发送给cfd
-ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
-- out_fd：待写入内容的文件描述符，必须是一个socket
-- in_fd：真实文件的文件描述符，类似mmap函数的文件描述符
-- offset:待读出内容的文件流偏移量，NULL表示从头开始读
-- count:指定在文件描述符in_fd和out_fd之间传输的字节数
-成功，返回传输的字节数；失败返回-1并设置errno
-```
-
-**sendfile()几乎是专门为在网络上传输文件而设计的**
-
-
-
-# 管道 pipe
-
-管道用于==进程间通信==
-
-详见【../03.多进程、管道/进程间通信.md】
-
-```c++
-#include＜unistd.h＞
-int pipe(int fd[2]);
-```
-
-创建2个文件描述符：fd[0]从管道读出数据（读端），fd[1]往管道写入数据（写端），不能反过来使用，且这两个文件描述符默认是阻塞的
-
-管道传输的是字节流，默认大小是65536字节
-
-
-
-## socketpair
-
-用于创建双向管道
-
-```c++
-#include＜sys/types.h＞
-#include＜sys/socket.h＞
-int socketpair(int domain,int type,int protocol,int fd[2]);
-```
-
-- domain：AF_UNIX，只能在UNIX本地使用双向管道
-- fd[0]和fd[1]可读可写
-
-
-
-## tee
-
-tee函数在==两个管道==文件描述符之间复制数据，也是==零拷贝操作==。它不消耗数据，因此源文件描述符上的数据仍然可以用于后续的读操作
-
-```c++
-#include＜fcntl.h＞
-ssize_t tee(int fd_in, int fd_out, size_t len, unsigned int flags);
-```
-
-- fd_in/fd_out：必须是管道文件描述符，管道读端读取/输出到管道写端
-- 该函数其他参数与splice相同
-
-tee函数成功时返回在两个文件描述符之间复制的数据数量（字节数）。返回0表示没有复制任何数据。tee失败时返回-1并设置errno
-
-Linux命令tee程序（同时输出数据到终端和文件的程序）可使用tee函数和splice函数实现
-
-
-
-# splice
-
-splice函数在内核中实现**两个文件描述符之间移动数据**，也是==零拷贝==操作。splice函数的定义如下:
-
-```c
-#define _GNU_SOURCE         /* See feature_test_macros(7) */
-#include <fcntl.h>
-
-ssize_t splice(int fd_in, loff_t *off_in, int fd_out,loff_t *off_out, size_t len, unsigned int flags);
-- fd_in：待输入数据的fd，从哪里读取数据
-- off_in：如果fd_in是一个管道文件描述符，则该参数为NULL；如果fd_in是socket，则表示从输入数据流的何处开始读取数据（偏移量），NULL表示从当前位置开始读入
-- fd_out/off_out：用于输出数据流，定向到哪个文件描述符
-- len：指定移动数据的长度
-- flags：控制数据如何移动
-    - SPLICE_F_MOVE：按整页内存移动数据
-    - SPLICE_F_NONBLOCK：非阻塞splice操作
-    - SPLICE_F_MORE：给内核一个提示，后续的splice调用将读取更多数据
-```
-
-使用splice函数时，==fd_in和fd_out必须至少有一个是管道文件描述符==。
-
-splice函数调用成功时返回移动字节的数量。它可能返回0，表示没有数据需要移动，这发生在从管道中读取数据（fd_in是管道文件描述符）而该管道没有被写入任何数据时。
-
-splice函数失败时返回-1并设置errno：
-
-
-
-# 5 存储映射IO
-
-把磁盘的文件的某块内容映射到当前进程虚拟空间中，==可用于进程间通信==
-
-
-
-## 5.1 mmap、munmap
-
-mmap函数用于申请一段内存空间。我们可以将这段内存作为==进程间通信的共享内存==，也可以将文件直
-接映射到其中。
-
-`void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);`
-
-- addr：指定映射到的进程空间的起始位置，如果为NULL，让系统自己分配，否则必须是内存页面大小（4096字节）的整数倍
-- length：映射区长度
-- prot：映射区的操作权限（读/写）
-  - PROT_READ，内存段可读。
-  - PROT_WRITE，内存段可写。
-  - PROT_EXEC，内存段可执行。
-  - PROT_NONE，内存段不能被访问。
-
-- flags：控制内存段内容被修改后程序的行为
-  - MAP_SHARED：在进程间共享这段内存。对该内存段的修改将同时影响被映射的文件
-  - MAP_PRIVATE：内存段为调用进程所私有。对该内存段的修改不会影响被映射的文件
-  - MAP_ANONYMOUS：这段内存不是从文件映射而来，其内容初始化为0，mmap最后两个参数忽略
-  - MAP_FIXED：内存段必须位于addr参数指定的地址处。
-  - MAP_HUGETLB：按照“大内存页面”来分配内存
-- fd：文件描述符，打开要映射的文件 ，一般通过open系统调用获得
-- offset：指定要映射文件的偏移量
-
-如果成功，返回创建的映射区首地址；失败，返回MAP_FAILED宏，并设置errno
-
-
-
-munmap函数则释放由mmap创建的这段内存空间
-
-`int munmap(void *addr, size_t length);`
-
-
-
-> 【示例1】映射文件到当前进程：mmap.c
-
-> 【示例2】使用匿名映射到父子进程，子进程写父进程读：fork_mmap.c
->
-> 【示例3】无血缘关系进程间通信
-
-
-
-==注意事项：==
-
-- 映射区大小不能为0（不能在open的时候使用O_CREATE创建一个**空文件**映射到进程空间）
-- 映射区的权限 **<=** 文件打开权限
-- 创建映射区时，文件至少需要有**读的权限**
-- 文件偏移量参数，必须是4K的整数倍（CPU的MMU单元负责内存映射，映射单位是4K）
-
-
-
-## 5.2 匿名映射区
-
-在之前的映射时，每次创建映射区一定要依赖一个打开的文件才能实现
-
-通常为了建立一个映射区，要open一个文件，创建好映射区后，再close文件，比较麻烦
-
-Linux系统提供了创建匿名映射区的办法，无需依赖一个文件即可创建映射区，需要指定flags参数
-
-flags=`MAP_SHARED|MAP_ANONYMOUS`
-
-```c
-int *p = mmap(NULL, 4, PROT_READ, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-// 映射区长度任意；文件描述符为-1，不使用文件
-```
-
-
-
-由于这个匿名映射的宏是Linux提供的，因此不适用于其他操作系统
-
-这时，可以使用`/dev/zero`文件来创建映射区，这个文件的大小是无限大的，给一指定任意长度，和`/dev/null`文件相对应
-
-```c
-fd = open("/dev/zero", O_RDWR);
-p = mmap(NULL, size, PROT_READ, MMAP_SHARED, fd, 0);
-```
-
-
-
-# 6 文件锁
-
-对文件进行加锁，防止产生竞争冲突
-
-```c
-int fcntl(int fd, int cmd, ... /* arg */ );
-
-int lockf(int fd, int cmd, off_t len);
-
-int flock(int fd, int operation);
-```
-
-
-
-> 【示例】20个子进程写同一个文件：add.c
 
