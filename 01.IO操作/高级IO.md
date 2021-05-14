@@ -175,14 +175,14 @@ int  FD_ISSET(int fd, fd_set *set);	//判断fd是否在集合中
   地读该socket，并且读操作返回的字节数大于0。
 - socket通信的对方关闭连接。此时对该socket的读操作将返回0。
 - 监听socket上==有新的连接请求==。
-- 连接socket接收到数据
+- ==连接socket接收到数据==
 - socket上有未处理的错误。此时我们可以使用getsockopt来读取和清除该错误
 
 **问题6：文件描述符可写情况？**
 
 - socket内核发送缓存区中的可用字节数大于或等于其低水位标记SO_SNDLOWAT。此时我们可以无阻塞地写该socket，并且写操作返回的字节数大于0。
 - socket的写操作被关闭。对写操作被关闭的socket执行写操作将触发一个SIGPIPE信号。
-- 客户端socket使用非阻塞connect连接成功或者失败（超时）之后。
+- ==客户端socket使用非阻塞connect连接成功或者失败（超时）之后。==
 - socket上有未处理的错误。此时我们可以使用getsockopt来读取和清除该错误。
 
 **问题7：文件描述符异常情况？**
@@ -661,7 +661,7 @@ select、poll、epoll
 
 
 
-# 5 应用
+# ==5 应用==
 
 ## 5.1 select实现非阻塞connect
 
