@@ -322,6 +322,10 @@ int  epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
     -  EPOLLIN：读事件
     -  EPOLLOUT：写事件
     -  EPOLLERR：错误事件
+    -  EPOLLPRI：表示对应的文件描述符有紧急的数据可读（这里应该表示有带外数据到来）；
+	-  EPOLLHUP：表示对应的文件描述符被挂断；
+	-  EPOLLET： 将EPOLL设为边缘触发(Edge Triggered)模式
+	-  EPOLLONESHOT：只监听一次事件，当监听完这次事件之后，如果还需要继续监听这个socket的话，需要再次把这个socket加入到EPOLL队列里
 成功返回0，失败返回-1并设置errno
 
 // 3、监听等待，相当于select()
@@ -523,7 +527,7 @@ ET 模式是一种边沿触发模型，在它检测到有 I/O 事件时，通过
 
 ### EPOLLONESHOT事件
 
-使用ET模式，一个socket上的某个事件还是可能被触发多次。这在并发程序中就会引起一个问题。比如一个线程（或进程）在读取完某个socket上的数据后开始处理这些数据，而在数据的处理过程中该socket上又有新数据可读（EPOLLIN再次被触发），此时另外一个线程被唤醒来读取这些新的数据。于是就出现了==两个线程同时操作一个socket的局面==，这显然不符合预期。
+使用ET模式，一个socket上的**某个事件还是可能被触发多次**。这在并发程序中就会引起一个问题。比如一个线程（或进程）在读取完某个socket上的数据后开始处理这些数据，而在数据的处理过程中该socket上又有新数据可读（EPOLLIN再次被触发），此时另外一个线程被唤醒来读取这些新的数据。于是就出现了==两个线程同时操作一个socket的局面==，这显然不符合预期。
 
 ==EPOLLONESHOT事件确保一个socket连接在任何时刻都只被一个线程/进程处理，保证了连接的完整性，从而避免了很多可能的竞态条件==
 
@@ -553,7 +557,7 @@ void reset_oneshot(int epollfd,int fd)
     epoll_event event;
     event.data.fd = fd;
     event.events = EPOLLIN|EPOLLET|EPOLLONESHOT;
-    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, ＆event);
+    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
 }
 ```
 
