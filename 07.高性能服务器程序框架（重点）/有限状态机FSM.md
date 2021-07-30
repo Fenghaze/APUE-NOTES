@@ -541,7 +541,7 @@ LINE_STATUS parse_line(char *buffer, int &checked_index, int &read_index)
     return LINE_OPEN;
 }
 
-//解析HTTP请求的每行内容
+//解析HTTP请求每行内容
 HTTP_CODE parse_requestline(char *temp, CHECK_STATE &checkstate)
 {
     char *url = strpbrk(temp, " ");

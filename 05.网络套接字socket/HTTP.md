@@ -91,8 +91,8 @@ URL的格式由下列三部分组成：
 　　在HTTP/1.1 协议中，所有的请求头，除Host外，都是可选的。　　
 
 ```http
-GET /phpstudy2015-6/ HTTP/1.1		←请求头
-Host: www.cnblogs.com				←请求行
+GET /phpstudy2015-6/ HTTP/1.1		←请求行
+Host: www.cnblogs.com				←请求头
 User-Agent: Mozilla/5.0 (Windows; U; Windows NT 6.0; en-US; rv:1.9.0.10) Gecko/2009042316 Firefox/3.0.10
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
 Accept-Language: en-us,en;q=0.5
@@ -100,7 +100,7 @@ Accept-Encoding: gzip,deflate
 Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7
 Keep-Alive: 300
 Connection: keep-alive
-If-Modified-Since: Sat, 06 May 2017 12:05:41 GMT
+If-Modified-Since: Sat, 06 May 2017 12:05:41 GMT ←请求头
 ```
 
 
