@@ -156,8 +156,6 @@ int flock(int fd, int operation);
 
 
 
-
-
 # ==进程间通信==
 
 ## 1 管道 pipe

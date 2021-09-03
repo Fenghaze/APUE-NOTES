@@ -341,7 +341,7 @@ DATA需要加编号，ACK也要加编号，以确保尽量不丢包
 ## TCP客户端
 
 - 1、`socket()`建立一个本地socket ld
-- 2、`connect()`发起请求，连接服务器
+- 2、`connect()`发起请求，连接服务器，此时就可以用第一步创建的socket进行通信
 - 3、`recv()`本地sockect ld接收服务端发送的数据
 - 4、`close()`关闭socket ld
 
